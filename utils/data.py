@@ -35,20 +35,27 @@ def transform_img_and_mask(img, mask):
 class SuperpixelDataset(torch.utils.data.Dataset):
     """Superpixel generation and labeling dataset."""
 
-    def __init__(self, root_dir, transform=None):
-        self.img_paths = glob.glob(os.path.join(root_dir, 'images', '*.png'))
-        self.mask_paths = glob.glob(os.path.join(root_dir, 'masks', '*.png'))
-        self.transform = transform or transform_img_and_mask
+    def __init__(self, root_dir, train=True, to_device='cpu'):
+        data_dir = os.path.join(root_dir, 'train' if train else 'val')
+        self.img_paths = glob.glob(os.path.join(data_dir, 'images', '*.png'))
+        self.mask_paths = glob.glob(os.path.join(data_dir, 'masks', '*.png'))
+        self.train = train
+        self.to_device = to_device
+
+        patch_area = config.PATCH_SIZE ** 2
+        img = Image.open(self.img_paths[0])
+        img_area = img.height * img.width
+        self.patches_per_img = int(np.round(img_area * patch_area))
 
     def __len__(self):
-        return len(self.img_paths)
+        return len(self.img_paths) * self.patches_per_img
 
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx])
         mask = Image.open(self.mask_paths[idx])
 
-        if self.transform is not None:
-            img, mask = self.transform(img, mask)
+        if self.train:
+            img, mask = transform_img_and_mask(img, mask)
 
         segments = slic(img, n_segments=config.SLIC_N_SEGMENTS,
                         compactness=config.SLIC_COMPACTNESS)
@@ -71,4 +78,10 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         sp_labels = np.argmax(
             sp_labels == sp_labels.max(axis=-1, keepdims=True), axis=-1)
 
-        return TF.to_tensor(img), torch.Tensor(sp_maps), torch.LongTensor(sp_labels)
+        # convert to tensors
+        img = TF.to_tensor(img).to(self.to_device)
+        mask = TF.to_tensor(mask).to(self.to_device)
+        sp_maps = torch.Tensor(sp_maps).to(self.to_device)
+        sp_labels = torch.LongTensor(sp_labels).to(self.to_device)
+
+        return img, mask, sp_maps, sp_labels
