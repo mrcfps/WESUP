@@ -6,10 +6,10 @@ def predict_whole_patch(sp_pred, sp_labels, sp_maps):
     Calculate patch prediction from superpixel predictions and labels.
     """
 
-    sp_pred.argmax_(dim=-1)
+    sp_pred = sp_pred.argmax(dim=-1)
 
     # flatten sp_maps to one channel
-    sp_maps.argmax_(dim=0)
+    sp_maps = sp_maps.argmax(dim=0)
 
     # initialize prediction mask
     pred_mask = torch.zeros_like(sp_maps).to(sp_maps.device)
