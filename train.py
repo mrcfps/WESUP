@@ -1,10 +1,8 @@
 import argparse
-import os
 import warnings
 
 warnings.filterwarnings('ignore')
 
-import numpy as np
 from tqdm import tqdm
 
 import torch
@@ -12,7 +10,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision.models import vgg13
 
-import config
 from wessup import Wessup
 from utils import predict_whole_patch
 from utils.data import get_trainval_dataloaders
@@ -38,7 +35,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = 'cuda' if args.gpu else 'cpu'
-    dataloaders = get_trainval_dataloaders(args.dataset_path, to_device=device)
+    dataloaders = get_trainval_dataloaders(args.dataset_path)
 
     vgg = vgg13(pretrained=True)
     wessup = Wessup(vgg.features, device=device)
@@ -48,7 +45,7 @@ if __name__ == '__main__':
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau()
 
     for epoch in range(args.epochs):
-        print('Epoch {}/{}'.format(epoch + 1, args.epochs))
+        print('\nEpoch {}/{}'.format(epoch + 1, args.epochs))
         print('-' * 10)
 
         for phase in ['train', 'val']:
@@ -62,6 +59,11 @@ if __name__ == '__main__':
                 tracker.eval()
 
             for img, mask, sp_maps, sp_labels in tqdm(dataloaders[phase]):
+                img = img.to(device)
+                mask = mask.to(device)
+                sp_maps = sp_maps.to(device)
+                sp_labels = sp_labels.to(device)
+
                 # squeeze out `n_samples` dimension
                 mask.squeeze_()
                 sp_maps.squeeze_()

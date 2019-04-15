@@ -36,22 +36,22 @@ def transform_img_and_mask(img, mask):
 class SuperpixelDataset(Dataset):
     """Superpixel generation and labeling dataset."""
 
-    def __init__(self, root_dir, train=True, to_device='cpu'):
+    def __init__(self, root_dir, train=True):
         data_dir = os.path.join(root_dir, 'train' if train else 'val')
         self.img_paths = glob.glob(os.path.join(data_dir, 'images', '*.png'))
         self.mask_paths = glob.glob(os.path.join(data_dir, 'masks', '*.png'))
         self.train = train
-        self.to_device = to_device
 
         patch_area = config.PATCH_SIZE ** 2
         img = Image.open(self.img_paths[0])
         img_area = img.height * img.width
-        self.patches_per_img = int(np.round(img_area * patch_area))
+        self.patches_per_img = int(np.round(img_area / patch_area))
 
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
     def __getitem__(self, idx):
+        idx = idx // self.patches_per_img
         img = Image.open(self.img_paths[idx])
         mask = Image.open(self.mask_paths[idx])
 
@@ -80,18 +80,20 @@ class SuperpixelDataset(Dataset):
             sp_labels == sp_labels.max(axis=-1, keepdims=True), axis=-1)
 
         # convert to tensors
-        img = TF.to_tensor(img).to(self.to_device)
-        mask = TF.to_tensor(mask).to(self.to_device)
-        sp_maps = torch.Tensor(sp_maps).to(self.to_device)
-        sp_labels = torch.LongTensor(sp_labels).to(self.to_device)
+        img = TF.to_tensor(img)
+        mask = TF.to_tensor(mask.astype('int')).long()
+        sp_maps = torch.Tensor(sp_maps)
+        sp_labels = torch.LongTensor(sp_labels)
 
         return img, mask, sp_maps, sp_labels
 
 
-def get_trainval_dataloaders(root_dir, to_device='cpu'):
+def get_trainval_dataloaders(root_dir):
+    """Returns training and validation dataloaders."""
+
     datasets = {
-        'train': SuperpixelDataset(root_dir, train=True, to_device=to_device),
-        'val': SuperpixelDataset(root_dir, train=False, to_device=to_device),
+        'train': SuperpixelDataset(root_dir, train=True),
+        'val': SuperpixelDataset(root_dir, train=False),
     }
     dataloaders = {
         'train': DataLoader(datasets['train'], batch_size=1,
