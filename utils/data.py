@@ -7,6 +7,7 @@ from PIL import Image
 from skimage.segmentation import slic
 
 import torch
+from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 
 import config
@@ -32,7 +33,7 @@ def transform_img_and_mask(img, mask):
     return img, mask
 
 
-class SuperpixelDataset(torch.utils.data.Dataset):
+class SuperpixelDataset(Dataset):
     """Superpixel generation and labeling dataset."""
 
     def __init__(self, root_dir, train=True, to_device='cpu'):
@@ -85,3 +86,18 @@ class SuperpixelDataset(torch.utils.data.Dataset):
         sp_labels = torch.LongTensor(sp_labels).to(self.to_device)
 
         return img, mask, sp_maps, sp_labels
+
+
+def get_trainval_dataloaders(root_dir, to_device='cpu'):
+    datasets = {
+        'train': SuperpixelDataset(root_dir, train=True, to_device=to_device),
+        'val': SuperpixelDataset(root_dir, train=False, to_device=to_device),
+    }
+    dataloaders = {
+        'train': DataLoader(datasets['train'], batch_size=1,
+                            shuffle=True, num_workers=os.cpu_count() // 2),
+        'val': DataLoader(datasets['val'], batch_size=1,
+                          shuffle=True, num_workers=os.cpu_count() // 2),
+    }
+
+    return dataloaders

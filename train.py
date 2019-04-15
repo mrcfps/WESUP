@@ -10,17 +10,15 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision.transforms import ToTensor
 from torchvision.models import vgg13
 
 import config
+from wessup import Wessup
 from utils import predict_whole_patch
-from utils.data import SuperpixelDataset
+from utils.data import get_trainval_dataloaders
 from utils.metrics import superpixel_accuracy
 from utils.metrics import pixel_accuracy
 from utils.metrics import MetricsTracker
-from wessup import Wessup
 
 
 def build_cli_parser():
@@ -40,16 +38,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = 'cuda' if args.gpu else 'cpu'
-    datasets = {
-        'train': SuperpixelDataset(args.dataset_path, train=True, to_device=device),
-        'val': SuperpixelDataset(args.dataset_path, train=False, to_device=device),
-    }
-    dataloaders = {
-        'train': DataLoader(datasets['train'], batch_size=1,
-                            shuffle=True, num_workers=os.cpu_count() // 2),
-        'val': DataLoader(datasets['val'], batch_size=1,
-                          shuffle=True, num_workers=os.cpu_count() // 2),
-    }
+    dataloaders = get_trainval_dataloaders(args.dataset_path, to_device=device)
 
     vgg = vgg13(pretrained=True)
     wessup = Wessup(vgg.features, device=device)
