@@ -17,7 +17,7 @@ from utils import predict_whole_patch
 from utils.data import get_trainval_dataloaders
 from utils.metrics import superpixel_accuracy
 from utils.metrics import pixel_accuracy
-from utils.metrics import MetricsTracker
+from utils.history import HistoryTracker
 
 
 def build_cli_parser():
@@ -53,7 +53,7 @@ if __name__ == '__main__':
     optimizer = optim.SGD(wessup.parameters(), lr=0.001, momentum=0.9)
 
     history_path = os.path.join(record_dir, 'history.csv')
-    tracker = MetricsTracker(history_path)
+    tracker = HistoryTracker(history_path)
 
     for epoch in range(args.epochs):
         print('\nEpoch {}/{}'.format(epoch + 1, args.epochs))
