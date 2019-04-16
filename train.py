@@ -42,6 +42,9 @@ if __name__ == '__main__':
 
     vgg = vgg13(pretrained=True)
     wessup = Wessup(vgg.features, device=device)
+    sp_feature_length = wessup.extractor.sp_feature_length
+    print(f'Initialized with {type(vgg)} backend ({sp_feature_length} superpixel features).')
+
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(wessup.parameters(), lr=0.001, momentum=0.9)
     tracker = MetricsTracker('history.csv')
