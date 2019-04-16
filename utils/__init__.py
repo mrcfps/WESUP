@@ -1,7 +1,7 @@
 import torch
 
 
-def predict_whole_patch(sp_pred, sp_labels, sp_maps):
+def predict_whole_patch(sp_pred, sp_maps):
     """
     Calculate patch prediction from superpixel predictions and labels.
     """

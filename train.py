@@ -1,4 +1,5 @@
 import argparse
+import os
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -25,6 +26,8 @@ def build_cli_parser():
                         help='Whether to use gpu')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
+    parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
+                        help='Number of CPUs to use for preparing superpixels')
     parser.add_argument('-m', '--message', help='Note on this experiment')
 
     return parser
@@ -79,7 +82,7 @@ if __name__ == '__main__':
                         optimizer.step()
 
                 sp_acc = superpixel_accuracy(sp_pred, sp_labels)
-                pred_mask = predict_whole_patch(sp_pred, sp_labels, sp_maps)
+                pred_mask = predict_whole_patch(sp_pred, sp_maps)
                 pixel_acc = pixel_accuracy(pred_mask, mask)
 
                 tracker.step(loss=loss.item(), sp_acc=sp_acc.item(),
