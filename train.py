@@ -31,6 +31,8 @@ def build_cli_parser():
                         help='Number of CPUs to use for preparing superpixels')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
+    parser.add_argument('--lr', type=float, default=0.001,
+                        help='Learning rate for optimizer')
     parser.add_argument('-m', '--message', help='Note on this experiment')
 
     return parser
@@ -46,12 +48,26 @@ if __name__ == '__main__':
     if args.resume_ckpt is not None:
         record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
         checkpoint = torch.load(args.resume_ckpt)
-        wessup = Wessup(vgg13().features, device=device)
+
+        # load previous model states
+        extractor = vgg13().features
+        wessup = Wessup(extractor, device=device)
         wessup.load_state_dict(checkpoint['model_state_dict'])
+
+        # load previous optimizer states and set to
+        optimizer = optim.SGD(wessup.parameters(), lr=args.lr)
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        optimizer.param_groups[0]['lr'] = args.lr
+
         initial_epoch = checkpoint['epoch'] + 1
     else:
         record_dir = record.prepare_record_dir()
+
+        # create new model
+        extractor = vgg13(pretrained=True).features
         wessup = Wessup(vgg13(pretrained=True).features, device=device)
+
+        optimizer = optim.SGD(wessup.parameters(), lr=args.lr, momentum=0.9)
         initial_epoch = 0
 
     sp_feature_length = wessup.extractor.sp_feature_length
@@ -60,7 +76,6 @@ if __name__ == '__main__':
     record.save_params(record_dir, args)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(wessup.parameters(), lr=0.001, momentum=0.9)
 
     history_path = os.path.join(record_dir, 'history.csv')
     tracker = HistoryTracker(history_path)
@@ -122,4 +137,5 @@ if __name__ == '__main__':
         torch.save({
             'epoch': epoch,
             'model_state_dict': wessup.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
         }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
