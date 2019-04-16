@@ -88,7 +88,7 @@ class SuperpixelDataset(Dataset):
         return img, mask, sp_maps, sp_labels
 
 
-def get_trainval_dataloaders(root_dir):
+def get_trainval_dataloaders(root_dir, num_workers):
     """Returns training and validation dataloaders."""
 
     datasets = {
@@ -97,9 +97,9 @@ def get_trainval_dataloaders(root_dir):
     }
     dataloaders = {
         'train': DataLoader(datasets['train'], batch_size=1,
-                            shuffle=True, num_workers=os.cpu_count() // 2),
+                            shuffle=True, num_workers=num_workers),
         'val': DataLoader(datasets['val'], batch_size=1,
-                          shuffle=True, num_workers=os.cpu_count() // 2),
+                          shuffle=True, num_workers=num_workers),
     }
 
     return dataloaders

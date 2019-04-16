@@ -38,7 +38,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = 'cuda' if args.gpu else 'cpu'
-    dataloaders = get_trainval_dataloaders(args.dataset_path)
+    dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
 
     vgg = vgg13(pretrained=True)
     wessup = Wessup(vgg.features, device=device)
