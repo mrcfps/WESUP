@@ -48,10 +48,10 @@ class SuperpixelDataset(Dataset):
         self.patches_per_img = int(np.round(img_area / patch_area))
 
     def __len__(self):
-        return len(self.img_paths) * self.patches_per_img
+        return len(self.img_paths)
 
     def __getitem__(self, idx):
-        idx = idx // self.patches_per_img
+        # idx = idx // self.patches_per_img
         img = Image.open(self.img_paths[idx])
         mask = Image.open(self.mask_paths[idx])
 

@@ -12,6 +12,7 @@ import torch.optim as optim
 from torchvision.models import vgg13
 
 from wessup import Wessup
+from utils import record
 from utils import predict_whole_patch
 from utils.data import get_trainval_dataloaders
 from utils.metrics import superpixel_accuracy
@@ -37,6 +38,9 @@ if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
 
+    record_dir = record.prepare_record_dir()
+    record.save_params(record_dir, args)
+
     device = 'cuda' if args.gpu else 'cpu'
     dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
 
@@ -47,8 +51,9 @@ if __name__ == '__main__':
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(wessup.parameters(), lr=0.001, momentum=0.9)
-    tracker = MetricsTracker('history.csv')
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau()
+
+    history_path = os.path.join(record_dir, 'history.csv')
+    tracker = MetricsTracker(history_path)
 
     for epoch in range(args.epochs):
         print('\nEpoch {}/{}'.format(epoch + 1, args.epochs))
@@ -95,6 +100,7 @@ if __name__ == '__main__':
 
             pbar.write(tracker.log())
             pbar.close()
-        
+
         tracker.save()
         tracker.clear()
+        record.plot_learning_curves(history_path)
