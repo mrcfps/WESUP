@@ -26,7 +26,7 @@ def prepare_record_dir():
     return record_dir
 
 
-def save_params(record_dir, args):
+def save_params(record_dir, args, fname='params'):
     """Save experiment parameters to record directory."""
 
     args = vars(args)
@@ -36,7 +36,10 @@ def save_params(record_dir, args):
         if not cfg_key.startswith('__'):
             args[cfg_key.lower()] = getattr(config, cfg_key)
 
-    with open(os.path.join(record_dir, 'params.json'), 'w') as fp:
+    num_of_runs = len([fn for fn in os.listdir(record_dir) if fn.startswith(fname)])
+    fname = f'{fname}-{num_of_runs}.json'
+
+    with open(os.path.join(record_dir, fname), 'w') as fp:
         json.dump(args, fp, indent=4)
 
 

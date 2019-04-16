@@ -29,6 +29,8 @@ def build_cli_parser():
                         help='Number of training epochs')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preparing superpixels')
+    parser.add_argument('-r', '--resume-ckpt',
+                        help='Path to previous checkpoint for resuming training')
     parser.add_argument('-m', '--message', help='Note on this experiment')
 
     return parser
@@ -38,16 +40,24 @@ if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
 
-    record_dir = record.prepare_record_dir()
-    record.save_params(record_dir, args)
-
     device = 'cuda' if args.gpu else 'cpu'
     dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
 
-    vgg = vgg13(pretrained=True)
-    wessup = Wessup(vgg.features, device=device)
+    if args.resume_ckpt is not None:
+        record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
+        checkpoint = torch.load(args.resume_ckpt)
+        wessup = Wessup(vgg13().features, device=device)
+        wessup.load_state_dict(checkpoint['model_state_dict'])
+        initial_epoch = checkpoint['epoch'] + 1
+    else:
+        record_dir = record.prepare_record_dir()
+        wessup = Wessup(vgg13(pretrained=True).features, device=device)
+        initial_epoch = 0
+
     sp_feature_length = wessup.extractor.sp_feature_length
-    print(f'Initialized with {type(vgg)} backend ({sp_feature_length} superpixel features).')
+    print(f'Wessup with {type(wessup.extractor)} backend ({sp_feature_length} superpixel features).')
+
+    record.save_params(record_dir, args)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(wessup.parameters(), lr=0.001, momentum=0.9)
@@ -55,8 +65,9 @@ if __name__ == '__main__':
     history_path = os.path.join(record_dir, 'history.csv')
     tracker = HistoryTracker(history_path)
 
-    for epoch in range(args.epochs):
-        print('\nEpoch {}/{}'.format(epoch + 1, args.epochs))
+    total_epochs = args.epochs + initial_epoch
+    for epoch in range(initial_epoch, total_epochs):
+        print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
         print('-' * 10)
 
         for phase in ['train', 'val']:
@@ -103,4 +114,12 @@ if __name__ == '__main__':
 
         tracker.save()
         tracker.clear()
+
+        # save learning curves
         record.plot_learning_curves(history_path)
+
+        # save checkpoints for resume training
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': wessup.state_dict(),
+        }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
