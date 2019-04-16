@@ -33,34 +33,37 @@ class MetricsTracker:
     def __init__(self, save_path=None):
         self.history = defaultdict(list)
         self.save_path = save_path
+        self.is_train = True
 
     def train(self):
         self.is_train = True
-        self.clear()
 
     def eval(self):
         self.is_train = False
-        self.clear()
 
     def step(self, metrics):
         reports = list()
         for k, v in metrics.items():
-            self.history[k if self.is_train else f'val_{k}'].append(v)
+            k = k if self.is_train else f'val_{k}'
+            self.history[k].append(v)
             reports.append('{} = {:.4f}'.format(k, v))
 
         return ', '.join(reports)
 
     def log(self):
+        # metrics = [sum(r) / len(r) for r in self.history.values()]
+        metrics = {
+            k: sum(v) / len(v)
+            for k, v in self.history.items()
+            if k.startswith('val_') != self.is_train
+        }
+        return ', '.join('average {} = {:.4f}'.format(name, value)
+                         for name, value in metrics.items()).capitalize()
+
+    def save(self):
+        """Save averaged metrics in this epoch to csv file."""
+
         metrics = [sum(r) / len(r) for r in self.history.values()]
-        print(', '.join(
-            'Running {} = {:.4f}'.format(name, value)
-            for name, value in zip(self.history.keys(), metrics)
-        ))
-
-        # no need to save history to csv file
-        if self.save_path is None:
-            return
-
         if not os.path.exists(self.save_path):
             # create a new csv file
             with open(self.save_path, 'w') as fp:
@@ -73,4 +76,6 @@ class MetricsTracker:
                 writer.writerow(metrics)
 
     def clear(self):
+        """Clear stored history."""
+
         self.history.clear()

@@ -90,5 +90,8 @@ if __name__ == '__main__':
 
                 pbar.set_postfix_str(tracker.step(metrics))
 
+            pbar.write(tracker.log())
             pbar.close()
-            tracker.log()
+        
+        tracker.save()
+        tracker.clear()
