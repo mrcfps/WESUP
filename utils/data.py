@@ -69,7 +69,7 @@ class SuperpixelDataset(Dataset):
         sp_maps = sp_maps / sp_maps.sum(axis=0, keepdims=True)
 
         mask = np.array(mask)
-        mask = np.concatenate([np.expand_dims(segments == i, -1)
+        mask = np.concatenate([np.expand_dims(mask == i, -1)
                                for i in range(config.N_CLASSES)], axis=-1)
         sp_labels = np.array([
             (mask * np.expand_dims(segments == i, -1)
