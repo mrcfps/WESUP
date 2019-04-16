@@ -42,14 +42,18 @@ class MetricsTracker:
         self.is_train = False
         self.clear()
 
-    def step(self, **metrics):
+    def step(self, metrics):
+        reports = list()
         for k, v in metrics.items():
             self.history[k if self.is_train else f'val_{k}'].append(v)
+            reports.append('{} = {:.4f}'.format(k, v))
+
+        return ', '.join(reports)
 
     def log(self):
         metrics = [sum(r) / len(r) for r in self.history.values()]
         print(', '.join(
-            '{} = {:.4f}'.format(name, value)
+            'Running {} = {:.4f}'.format(name, value)
             for name, value in zip(self.history.keys(), metrics)
         ))
 

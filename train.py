@@ -61,7 +61,8 @@ if __name__ == '__main__':
                 wessup.eval()
                 tracker.eval()
 
-            for img, mask, sp_maps, sp_labels in tqdm(dataloaders[phase]):
+            pbar = tqdm(dataloaders[phase])
+            for img, mask, sp_maps, sp_labels in pbar:
                 img = img.to(device)
                 mask = mask.to(device)
                 sp_maps = sp_maps.to(device)
@@ -73,19 +74,21 @@ if __name__ == '__main__':
                 sp_labels.squeeze_()
 
                 optimizer.zero_grad()
+                metrics = dict()
 
                 with torch.set_grad_enabled(phase == 'train'):
                     sp_pred = wessup(img, sp_maps)
                     loss = criterion(sp_pred, sp_labels)
+                    metrics['loss'] = loss.item()
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                sp_acc = superpixel_accuracy(sp_pred, sp_labels)
                 pred_mask = predict_whole_patch(sp_pred, sp_maps)
-                pixel_acc = pixel_accuracy(pred_mask, mask)
+                metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
+                metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
 
-                tracker.step(loss=loss.item(), sp_acc=sp_acc.item(),
-                             pixel_acc=pixel_acc.item())
+                pbar.set_postfix_str(tracker.step(metrics))
 
+            pbar.close()
             tracker.log()
