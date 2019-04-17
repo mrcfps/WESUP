@@ -2,6 +2,9 @@
 Utilities for recording multiple runs of experiments.
 """
 
+import matplotlib
+matplotlib.use('Agg')
+
 import json
 import os
 from datetime import datetime
