@@ -71,7 +71,7 @@ if __name__ == '__main__':
         initial_epoch = 0
 
     sp_feature_length = wessup.extractor.sp_feature_length
-    print(f'Wessup with {type(wessup.extractor)} backend ({sp_feature_length} superpixel features).')
+    print(f'Wessup with {sp_feature_length} superpixel features.')
 
     record.save_params(record_dir, args)
 
@@ -120,7 +120,7 @@ if __name__ == '__main__':
 
                 pred_mask = predict_whole_patch(sp_pred, sp_maps)
                 metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
-                metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
+                metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
 
                 pbar.set_postfix_str(tracker.step(metrics))
 
