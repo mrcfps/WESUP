@@ -37,8 +37,8 @@ tracker = None
 def build_cli_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('--gpu', action='store_true', default=False,
-                        help='Whether to use gpu')
+    parser.add_argument('--no-gpu', action='store_true', default=False,
+                        help='Whether to avoid using gpu')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-w', '--warmup', type=int, default=0,
@@ -127,7 +127,7 @@ if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
 
-    device = 'cuda' if args.gpu else 'cpu'
+    device = 'cpu' if args.no_gpu and not torch.cuda.is_available() else 'cuda'
     dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
 
     if args.resume_ckpt is not None:
