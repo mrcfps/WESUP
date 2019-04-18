@@ -102,9 +102,8 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
         pbar.write(tracker.log())
         pbar.close()
 
-    tracker.clear()
-
     if not warmup:
+        # save metrics to csv file
         tracker.save()
 
         # save learning curves
@@ -116,6 +115,8 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
             'model_state_dict': wessup.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
         }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
+
+    tracker.clear()
 
 
 if __name__ == '__main__':
