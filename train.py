@@ -154,22 +154,26 @@ if __name__ == '__main__':
         # create new model
         wessup = Wessup(vgg13(pretrained=True).features, device=device)
 
-        optimizer = optim.SGD(wessup.classifier.parameters(), lr=0.001, momentum=0.9)
+        if args.warmup > 0:
+            # only optimize classifier of wessup
+            optimizer = optim.SGD(wessup.classifier.parameters(), lr=0.001, momentum=0.9)
 
-        print('\nWarmup Stage')
-        print('=' * 20)
-        for epoch in range(args.warmup):
-            print('\nWarmup epoch {}/{}'.format(epoch + 1, args.warmup))
-            print('-' * 10)
-            train_one_epoch(wessup, optimizer, epoch, warmup=True)
+            print('\nWarmup Stage')
+            print('=' * 20)
+            for epoch in range(1, args.warmup + 1):
+                print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
+                print('-' * 10)
+                train_one_epoch(wessup, optimizer, epoch, warmup=True)
 
         optimizer = optim.SGD(wessup.parameters(), lr=args.lr, momentum=0.9)
-        initial_epoch = 0
+        initial_epoch = 1
 
     record.save_params(record_dir, args)
 
-    total_epochs = args.epochs + initial_epoch
-    for epoch in range(initial_epoch, total_epochs):
-        print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
+    print('\nTraining Stage')
+    print('=' * 20)
+    total_epochs = args.epochs + initial_epoch - 1
+    for epoch in range(initial_epoch, total_epochs + 1):
+        print('\nEpoch {}/{}'.format(epoch, total_epochs))
         print('-' * 10)
         train_one_epoch(wessup, optimizer, epoch)
