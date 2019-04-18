@@ -99,13 +99,13 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
         for data in pbar:
             train_one_iteration(model, optimizer, phase, *data)
 
-        if not warmup:
-            pbar.write(tracker.log())
+        pbar.write(tracker.log())
         pbar.close()
+
+    tracker.clear()
 
     if not warmup:
         tracker.save()
-        tracker.clear()
 
         # save learning curves
         record.plot_learning_curves(tracker.save_path)
@@ -151,18 +151,15 @@ if __name__ == '__main__':
 
         optimizer = optim.SGD(wessup.classifier.parameters(), lr=0.001, momentum=0.9)
 
-        print('Warmup Stage')
+        print('\nWarmup Stage')
         print('=' * 20)
         for epoch in range(args.warmup):
-            print('\nEpoch {}/{}'.format(epoch + 1, args.warmup))
+            print('\nWarmup epoch {}/{}'.format(epoch + 1, args.warmup))
             print('-' * 10)
             train_one_epoch(wessup, optimizer, epoch, warmup=True)
 
         optimizer = optim.SGD(wessup.parameters(), lr=args.lr, momentum=0.9)
         initial_epoch = 0
-
-    sp_feature_length = wessup.extractor.sp_feature_length
-    print(f'Wessup with {sp_feature_length} superpixel features.')
 
     record.save_params(record_dir, args)
 
@@ -171,60 +168,3 @@ if __name__ == '__main__':
         print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
         print('-' * 10)
         train_one_epoch(wessup, optimizer, epoch)
-        # print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
-        # print('-' * 10)
-
-        # for phase in ['train', 'val']:
-        #     print(f'{phase.capitalize()} phase:')
-
-        #     if phase == 'train':
-        #         wessup.train()
-        #         tracker.train()
-        #     else:
-        #         wessup.eval()
-        #         tracker.eval()
-
-        #     pbar = tqdm(dataloaders[phase])
-        #     for img, mask, sp_maps, sp_labels in pbar:
-        #         img = img.to(device)
-        #         mask = mask.to(device)
-        #         sp_maps = sp_maps.to(device)
-        #         sp_labels = sp_labels.to(device)
-
-        #         # squeeze out `n_samples` dimension
-        #         mask.squeeze_()
-        #         sp_maps.squeeze_()
-        #         sp_labels.squeeze_()
-
-        #         optimizer.zero_grad()
-        #         metrics = dict()
-
-        #         with torch.set_grad_enabled(phase == 'train'):
-        #             sp_pred = wessup(img, sp_maps)
-        #             loss = criterion(sp_pred, sp_labels)
-        #             metrics['loss'] = loss.item()
-        #             if phase == 'train':
-        #                 loss.backward()
-        #                 optimizer.step()
-
-        #         pred_mask = predict_whole_patch(sp_pred, sp_maps)
-        #         metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
-        #         metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
-
-        #         tracker.step(metrics)
-
-        #     pbar.write(tracker.log())
-        #     pbar.close()
-
-        # tracker.save()
-        # tracker.clear()
-
-        # # save learning curves
-        # record.plot_learning_curves(history_path)
-
-        # # save checkpoints for resume training
-        # torch.save({
-        #     'epoch': epoch,
-        #     'model_state_dict': wessup.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict(),
-        # }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))

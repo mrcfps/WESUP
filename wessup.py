@@ -14,6 +14,10 @@ class CNNFeatureExtractor:
             for layer in self.model
             if isinstance(layer, nn.Conv2d)
         ]
+
+        print(f'Wessup extractor with {len(self.conv_layers)} conv layers.')
+        print(f'Resulting in superpixel features of length {self.sp_feature_length}.')
+
         self.feature_maps = None
         self.fm_size = (config.PATCH_SIZE, config.PATCH_SIZE)
         self.hooks = []
