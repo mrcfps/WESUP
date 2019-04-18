@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torchvision.models import vgg13
 
@@ -19,6 +20,18 @@ from utils.metrics import superpixel_accuracy
 from utils.metrics import pixel_accuracy
 from utils.history import HistoryTracker
 
+# which device to use
+device = None
+
+# Train/val dataLoaders dictionary
+dataloaders = None
+
+# path to experiment record directory
+record_dir = None
+
+# history metrics tracker object
+tracker = None
+
 
 def build_cli_parser():
     parser = argparse.ArgumentParser()
@@ -27,6 +40,8 @@ def build_cli_parser():
                         help='Whether to use gpu')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
+    parser.add_argument('-w', '--warmup', type=int, default=0,
+                        help='Number of warmup epochs (freeze CNN) before training')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preparing superpixels')
     parser.add_argument('-r', '--resume-ckpt',
@@ -38,6 +53,71 @@ def build_cli_parser():
     return parser
 
 
+
+def train_one_iteration(model, optimizer, phase, *data):
+    img, mask, sp_maps, sp_labels = data
+    img = img.to(device)
+    mask = mask.to(device)
+    sp_maps = sp_maps.to(device)
+    sp_labels = sp_labels.to(device)
+
+    # squeeze out `n_samples` dimension
+    mask.squeeze_()
+    sp_maps.squeeze_()
+    sp_labels.squeeze_()
+
+    optimizer.zero_grad()
+    metrics = dict()
+
+    with torch.set_grad_enabled(phase == 'train'):
+        sp_pred = model(img, sp_maps)
+        loss = F.cross_entropy(sp_pred, sp_labels)
+        metrics['loss'] = loss.item()
+        if phase == 'train':
+            loss.backward()
+            optimizer.step()
+
+    pred_mask = predict_whole_patch(sp_pred, sp_maps)
+    metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
+    metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
+
+    tracker.step(metrics)
+
+
+def train_one_epoch(model, optimizer, epoch, warmup=False):
+    for phase in ['train', 'val']:
+        print(f'{phase.capitalize()} phase:')
+
+        if phase == 'train':
+            model.train()
+            tracker.train()
+        else:
+            model.eval()
+            tracker.eval()
+
+        pbar = tqdm(dataloaders[phase])
+        for data in pbar:
+            train_one_iteration(model, optimizer, phase, *data)
+
+        if not warmup:
+            pbar.write(tracker.log())
+        pbar.close()
+
+    if not warmup:
+        tracker.save()
+        tracker.clear()
+
+        # save learning curves
+        record.plot_learning_curves(tracker.save_path)
+
+        # save checkpoints for resume training
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': wessup.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
+
+
 if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
@@ -47,6 +127,8 @@ if __name__ == '__main__':
 
     if args.resume_ckpt is not None:
         record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
+        tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
+
         checkpoint = torch.load(args.resume_ckpt)
 
         # load previous model states
@@ -54,7 +136,7 @@ if __name__ == '__main__':
         wessup = Wessup(extractor, device=device)
         wessup.load_state_dict(checkpoint['model_state_dict'])
 
-        # load previous optimizer states and set to
+        # load previous optimizer states and set learning rate to given value
         optimizer = optim.SGD(wessup.parameters(), lr=args.lr)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         optimizer.param_groups[0]['lr'] = args.lr
@@ -62,10 +144,19 @@ if __name__ == '__main__':
         initial_epoch = checkpoint['epoch'] + 1
     else:
         record_dir = record.prepare_record_dir()
+        tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
 
         # create new model
-        extractor = vgg13(pretrained=True).features
         wessup = Wessup(vgg13(pretrained=True).features, device=device)
+
+        optimizer = optim.SGD(wessup.classifier.parameters(), lr=0.001, momentum=0.9)
+
+        print('Warmup Stage')
+        print('=' * 20)
+        for epoch in range(args.warmup):
+            print('\nEpoch {}/{}'.format(epoch + 1, args.warmup))
+            print('-' * 10)
+            train_one_epoch(wessup, optimizer, epoch, warmup=True)
 
         optimizer = optim.SGD(wessup.parameters(), lr=args.lr, momentum=0.9)
         initial_epoch = 0
@@ -75,67 +166,65 @@ if __name__ == '__main__':
 
     record.save_params(record_dir, args)
 
-    criterion = nn.CrossEntropyLoss()
-
-    history_path = os.path.join(record_dir, 'history.csv')
-    tracker = HistoryTracker(history_path)
-
     total_epochs = args.epochs + initial_epoch
     for epoch in range(initial_epoch, total_epochs):
         print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
         print('-' * 10)
+        train_one_epoch(wessup, optimizer, epoch)
+        # print('\nEpoch {}/{}'.format(epoch + 1, total_epochs))
+        # print('-' * 10)
 
-        for phase in ['train', 'val']:
-            print(f'{phase.capitalize()} phase:')
+        # for phase in ['train', 'val']:
+        #     print(f'{phase.capitalize()} phase:')
 
-            if phase == 'train':
-                wessup.train()
-                tracker.train()
-            else:
-                wessup.eval()
-                tracker.eval()
+        #     if phase == 'train':
+        #         wessup.train()
+        #         tracker.train()
+        #     else:
+        #         wessup.eval()
+        #         tracker.eval()
 
-            pbar = tqdm(dataloaders[phase])
-            for img, mask, sp_maps, sp_labels in pbar:
-                img = img.to(device)
-                mask = mask.to(device)
-                sp_maps = sp_maps.to(device)
-                sp_labels = sp_labels.to(device)
+        #     pbar = tqdm(dataloaders[phase])
+        #     for img, mask, sp_maps, sp_labels in pbar:
+        #         img = img.to(device)
+        #         mask = mask.to(device)
+        #         sp_maps = sp_maps.to(device)
+        #         sp_labels = sp_labels.to(device)
 
-                # squeeze out `n_samples` dimension
-                mask.squeeze_()
-                sp_maps.squeeze_()
-                sp_labels.squeeze_()
+        #         # squeeze out `n_samples` dimension
+        #         mask.squeeze_()
+        #         sp_maps.squeeze_()
+        #         sp_labels.squeeze_()
 
-                optimizer.zero_grad()
-                metrics = dict()
+        #         optimizer.zero_grad()
+        #         metrics = dict()
 
-                with torch.set_grad_enabled(phase == 'train'):
-                    sp_pred = wessup(img, sp_maps)
-                    loss = criterion(sp_pred, sp_labels)
-                    metrics['loss'] = loss.item()
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+        #         with torch.set_grad_enabled(phase == 'train'):
+        #             sp_pred = wessup(img, sp_maps)
+        #             loss = criterion(sp_pred, sp_labels)
+        #             metrics['loss'] = loss.item()
+        #             if phase == 'train':
+        #                 loss.backward()
+        #                 optimizer.step()
 
-                pred_mask = predict_whole_patch(sp_pred, sp_maps)
-                metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
-                metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
+        #         pred_mask = predict_whole_patch(sp_pred, sp_maps)
+        #         metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
+        #         metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
 
-                pbar.set_postfix_str(tracker.step(metrics))
+        #         tracker.step(metrics)
 
-            pbar.write(tracker.log())
-            pbar.close()
+        #     pbar.write(tracker.log())
+        #     pbar.close()
 
-        tracker.save()
-        tracker.clear()
+        # tracker.save()
+        # tracker.clear()
 
-        # save learning curves
-        record.plot_learning_curves(history_path)
+        # # save learning curves
+        # record.plot_learning_curves(history_path)
 
-        # save checkpoints for resume training
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': wessup.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
+        # # save checkpoints for resume training
+        # torch.save({
+        #     'epoch': epoch,
+        #     'model_state_dict': wessup.state_dict(),
+        #     'optimizer_state_dict': optimizer.state_dict(),
+        # }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
