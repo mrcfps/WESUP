@@ -12,3 +12,7 @@ SLIC_COMPACTNESS = 40
 
 # Period (epochs) for saving checkpoints
 CHECKPOINT_PERIOD = 5
+
+# Optimization parameters
+MOMENTUM = 0.9
+WEIGHT_DECAY = 0.0005

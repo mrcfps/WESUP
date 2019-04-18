@@ -63,18 +63,12 @@ class Wessup(nn.Module):
         self.extractor = CNNFeatureExtractor(cnn_module, device)
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.extractor.sp_feature_length, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Linear(512, 128),
-            nn.ReLU(),
-            nn.Linear(128, 32),
-            nn.ReLU(),
+            self._build_fc_layer(self.extractor.sp_feature_length, 2048),
+            self._build_fc_layer(2048, 2048),
+            self._build_fc_layer(2048, 1024),
+            self._build_fc_layer(1024, 512),
+            self._build_fc_layer(512, 128),
+            self._build_fc_layer(128, 32),
             nn.Linear(32, config.N_CLASSES),
         ).to(device)
 
@@ -93,3 +87,11 @@ class Wessup(nn.Module):
         x = self.classifier(x)
 
         return x
+
+    def _build_fc_layer(self, in_features, out_features):
+        return nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.BatchNorm1d(out_features),
+            nn.ReLU(),
+            nn.Dropout()
+        )

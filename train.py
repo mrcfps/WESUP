@@ -142,7 +142,12 @@ if __name__ == '__main__':
         wessup.load_state_dict(checkpoint['model_state_dict'])
 
         # load previous optimizer states and set learning rate to given value
-        optimizer = optim.SGD(wessup.parameters(), lr=args.lr)
+        optimizer = optim.SGD(
+            wessup.parameters(),
+            lr=args.lr,
+            momentum=config.MOMENTUM,
+            weight_decay=config.WEIGHT_DECAY
+        )
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         optimizer.param_groups[0]['lr'] = args.lr
 
@@ -156,7 +161,12 @@ if __name__ == '__main__':
 
         if args.warmup > 0:
             # only optimize classifier of wessup
-            optimizer = optim.SGD(wessup.classifier.parameters(), lr=0.001, momentum=0.9)
+            optimizer = optim.SGD(
+                wessup.classifier.parameters(),
+                lr=0.001,
+                momentum=config.MOMENTUM,
+                weight_decay=config.WEIGHT_DECAY
+            )
 
             print('\nWarmup Stage')
             print('=' * 20)
@@ -165,7 +175,12 @@ if __name__ == '__main__':
                 print('-' * 10)
                 train_one_epoch(wessup, optimizer, epoch, warmup=True)
 
-        optimizer = optim.SGD(wessup.parameters(), lr=args.lr, momentum=0.9)
+        optimizer = optim.SGD(
+            wessup.classifier.parameters(),
+            lr=args.lr,
+            momentum=config.MOMENTUM,
+            weight_decay=config.WEIGHT_DECAY
+        )
         initial_epoch = 1
 
     record.save_params(record_dir, args)
