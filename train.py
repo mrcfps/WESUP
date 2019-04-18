@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision.models import vgg13
 
+import config
 from wessup import Wessup
 from utils import record
 from utils import predict_whole_patch
@@ -109,12 +110,15 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
         # save learning curves
         record.plot_learning_curves(tracker.save_path)
 
-        # save checkpoints for resume training
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': wessup.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch)))
+        if epoch % config.CHECKPOINT_PERIOD == 0:
+            # save checkpoints for resuming training
+            ckpt_path = os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': wessup.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, ckpt_path)
+            print(f'Save checkpoint to {ckpt_path}.')
 
     tracker.clear()
 

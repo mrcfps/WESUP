@@ -9,3 +9,6 @@ N_CLASSES = 3
 # SLIC parameters.
 SLIC_N_SEGMENTS = 500
 SLIC_COMPACTNESS = 40
+
+# Period (epochs) for saving checkpoints
+CHECKPOINT_PERIOD = 5
