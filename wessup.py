@@ -1,10 +1,6 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torchvision.transforms import ToTensor
 
 import config
 
@@ -25,7 +21,7 @@ class CNNFeatureExtractor:
         self._register_hooks()
 
     def _hook_fn(self, module, input, output):
-        output = F.interpolate(output, self.fm_size)
+        output = F.interpolate(output, self.fm_size, mode='bilinear')
 
         if self.feature_maps is None:
             self.feature_maps = output.squeeze()
@@ -63,12 +59,19 @@ class Wessup(nn.Module):
         self.extractor = CNNFeatureExtractor(cnn_module, device)
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.extractor.sp_feature_length, 512),
+            nn.Linear(self.extractor.sp_feature_length, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Linear(512, 128),
             nn.ReLU(),
-            nn.Linear(128, config.N_CLASSES),
-            nn.Softmax(),
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Linear(32, config.N_CLASSES),
         ).to(device)
 
         self.device = device
