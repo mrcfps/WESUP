@@ -47,7 +47,7 @@ def build_cli_parser():
                         help='Number of CPUs to use for preparing superpixels')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
-    parser.add_argument('--lr', type=float, default=0.001,
+    parser.add_argument('--lr', type=float, default=0.01,
                         help='Learning rate for optimizer')
     parser.add_argument('-m', '--message', help='Note on this experiment')
 
@@ -144,9 +144,7 @@ if __name__ == '__main__':
         # load previous optimizer states and set learning rate to given value
         optimizer = optim.SGD(
             wessup.parameters(),
-            lr=args.lr,
-            momentum=config.MOMENTUM,
-            weight_decay=config.WEIGHT_DECAY
+            lr=args.lr
         )
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         optimizer.param_groups[0]['lr'] = args.lr
@@ -163,7 +161,7 @@ if __name__ == '__main__':
             # only optimize classifier of wessup
             optimizer = optim.SGD(
                 wessup.classifier.parameters(),
-                lr=0.001,
+                lr=0.01,
                 momentum=config.MOMENTUM,
                 weight_decay=config.WEIGHT_DECAY
             )
@@ -176,7 +174,7 @@ if __name__ == '__main__':
                 train_one_epoch(wessup, optimizer, epoch, warmup=True)
 
         optimizer = optim.SGD(
-            wessup.classifier.parameters(),
+            wessup.parameters(),
             lr=args.lr,
             momentum=config.MOMENTUM,
             weight_decay=config.WEIGHT_DECAY
