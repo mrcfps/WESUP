@@ -6,8 +6,10 @@ import matplotlib
 matplotlib.use('Agg')
 
 import json
+import glob
 import os
 from datetime import datetime
+from shutil import copyfile, copytree
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -44,6 +46,19 @@ def save_params(record_dir, args, fname='params'):
 
     with open(os.path.join(record_dir, fname), 'w') as fp:
         json.dump(args, fp, indent=4)
+
+
+def copy_source_files(record_dir):
+    """Copy all source scripts to record directory for reproduction."""
+
+    source_dir = os.path.join(record_dir, 'source')
+    if not os.path.exists(source_dir):
+        os.mkdir(source_dir)
+
+    for source_file in glob.glob('*.py'):
+        copyfile(source_file, os.path.join(source_dir, source_file))
+
+    copytree('utils', os.path.join(source_dir, 'utils'))
 
 
 def plot_learning_curves(history_path):

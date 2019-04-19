@@ -152,6 +152,8 @@ if __name__ == '__main__':
         initial_epoch = checkpoint['epoch'] + 1
     else:
         record_dir = record.prepare_record_dir()
+        record.copy_source_files(record_dir)
+
         tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
 
         # create new model
