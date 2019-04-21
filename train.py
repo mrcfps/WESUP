@@ -72,7 +72,8 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
-        loss = F.cross_entropy(sp_pred, sp_labels)
+        loss = F.cross_entropy(sp_pred, sp_labels,
+                               weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()

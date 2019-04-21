@@ -6,6 +6,9 @@ PATCH_SIZE = 256
 # Number of target classes.
 N_CLASSES = 3
 
+# Class weights for cross-entropy loss function (background, class-1, class-2)
+CLASS_WEIGHTS = (1, 2, 2)
+
 # SLIC parameters.
 SLIC_N_SEGMENTS = 500
 SLIC_COMPACTNESS = 40
