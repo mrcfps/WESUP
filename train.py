@@ -55,7 +55,12 @@ def build_cli_parser():
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    img, mask, sp_maps, sp_labels = data
+    if len(data) == 4:  # data from `FullAnnotationDataset`
+        img, mask, sp_maps, sp_labels = data
+    else:  # data from `DotAnnotationDataset`
+        img, sp_maps, sp_labels = data
+        mask = None
+
     img = img.to(device)
     sp_maps = sp_maps.to(device).squeeze()
     sp_labels = sp_labels.to(device).squeeze()
@@ -78,11 +83,11 @@ def train_one_iteration(model, optimizer, phase, *data):
             loss.backward()
             optimizer.step()
 
-    pred_mask = predict_whole_patch(sp_pred, sp_maps)
     metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
 
     if mask is not None:
         mask = mask.to(device).squeeze()
+        pred_mask = predict_whole_patch(sp_pred, sp_maps)
         metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
 
     tracker.step(metrics)

@@ -195,7 +195,7 @@ class DotAnnotationDataset(Dataset):
         sp_labels = torch.LongTensor(sp_labels)
 
         # the second return value is the missing mask for convenience
-        return img, None, sp_maps, sp_labels
+        return img, sp_maps, sp_labels
 
 
 def get_trainval_dataloaders(root_dir, num_workers):
