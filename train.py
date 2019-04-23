@@ -81,7 +81,7 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     pred_mask = predict_whole_patch(sp_pred, sp_maps)
     metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
-    metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask.argmax(dim=0)).item()
+    metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
 
     tracker.step(metrics)
 
