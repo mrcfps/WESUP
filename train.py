@@ -54,26 +54,25 @@ def build_cli_parser():
     return parser
 
 
-
 def train_one_iteration(model, optimizer, phase, *data):
     img, mask, sp_maps, sp_labels = data
     img = img.to(device)
-    mask = mask.to(device)
-    sp_maps = sp_maps.to(device)
-    sp_labels = sp_labels.to(device)
-
-    # squeeze out `n_samples` dimension
-    mask.squeeze_()
-    sp_maps.squeeze_()
-    sp_labels.squeeze_()
+    sp_maps = sp_maps.to(device).squeeze()
+    sp_labels = sp_labels.to(device).squeeze()
 
     optimizer.zero_grad()
     metrics = dict()
 
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
-        loss = F.cross_entropy(sp_pred, sp_labels,
-                               weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+        if sp_pred.size(0) > sp_labels.size(0):
+            # weakly-supervised mode
+            sp_pred = sp_pred[:sp_labels.size(0)]
+            loss = F.cross_entropy(sp_pred, sp_labels,
+                                   weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+        else:  # fully-supervised mode
+            loss = F.cross_entropy(sp_pred, sp_labels,
+                                   weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()
@@ -81,7 +80,10 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     pred_mask = predict_whole_patch(sp_pred, sp_maps)
     metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
-    metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
+
+    if mask is not None:
+        mask = mask.to(device).squeeze()
+        metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
 
     tracker.step(metrics)
 
@@ -113,7 +115,8 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
 
         if epoch % config.CHECKPOINT_PERIOD == 0:
             # save checkpoints for resuming training
-            ckpt_path = os.path.join(record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
+            ckpt_path = os.path.join(
+                record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': wessup.state_dict(),
