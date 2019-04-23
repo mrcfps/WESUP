@@ -83,15 +83,21 @@ def _segment_superpixels(img, label):
         labeled_sps, sp_labels = [], []
 
         for point in label:
-            i, j, label = point
-            if segments[i, j] not in labeled_sps:
-                labeled_sps.append(segments[i, j])
+            i, j, class_ = point
+            try:
+                if segments[i, j] not in labeled_sps:
+                    labeled_sps.append(segments[i, j])
+                    sp_labels.append(class_)
+            except IndexError:
+                # point is outside this patch, ignore it
+                pass
 
-        unlabeled_sps = list(set(np.unique(segments) - set(labeled_sps)))
+        unlabeled_sps = list(set(np.unique(segments)) - set(labeled_sps))
         sp_idx_list = labeled_sps + unlabeled_sps
 
     # stacking normalized superpixel segment maps
-    sp_maps = np.concatenate([np.expand_dims(segments == idx, 0) for idx in sp_idx_list])
+    sp_maps = np.concatenate(
+        [np.expand_dims(segments == idx, 0) for idx in sp_idx_list])
     sp_maps = sp_maps / sp_maps.sum(axis=0, keepdims=True)
 
     return sp_maps, sp_labels
