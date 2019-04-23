@@ -5,6 +5,7 @@ import random
 from shutil import copytree
 
 import numpy as np
+from tqdm import tqdm
 from PIL import Image
 from skimage.measure import label
 
@@ -74,12 +75,12 @@ if __name__ == '__main__':
         os.mkdir(dst_train_dir)
         os.mkdir(dst_label_dir)
 
-    # copy all training images
+    print('Copy all training images ...')
     copytree(j(src_train_dir, 'images'), j(dst_train_dir, 'images'))
 
-    # generate labels with dot annotation
+    print('Generate labels with dot annotation ...')
     src_mask_dir = j(src_train_dir, 'masks')
-    for fname in os.listdir(src_mask_dir):
+    for fname in tqdm(os.listdir(src_mask_dir)):
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(j(src_mask_dir, fname)))
         points = _generate_points(mask, label_percent=args.label_percent)
@@ -88,5 +89,5 @@ if __name__ == '__main__':
             writer = csv.writer(fp)
             writer.writerows(points)
 
-    # copy the entire validation set
+    print('Copy validation data ...')
     copytree(j(args.dataset_path, 'val'), j(args.output, 'val'))
