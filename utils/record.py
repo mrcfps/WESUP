@@ -25,26 +25,34 @@ def prepare_record_dir():
 
     record_dir = os.path.join(
         'records', datetime.now().strftime('%Y%m%d-%I%M-%p'))
-    os.mkdir(record_dir)
-    os.mkdir(os.path.join(record_dir, 'checkpoints'))
+
+    if not os.path.exists(record_dir):
+        os.mkdir(record_dir)
+
+    checkpoint_dir = os.path.join(record_dir, 'checkpoints')
+    if not os.path.exists(checkpoint_dir):
+        os.mkdir(checkpoint_dir)
 
     return record_dir
 
 
-def save_params(record_dir, args, fname='params'):
+def save_params(record_dir, args):
     """Save experiment parameters to record directory."""
 
     args = vars(args)
+    params_dir = os.path.join(record_dir, 'params')
+
+    if not os.path.exists(params_dir):
+        os.mkdir(params_dir)
 
     # save all parameters in config.py
     for cfg_key in dir(config):
         if not cfg_key.startswith('__'):
             args[cfg_key.lower()] = getattr(config, cfg_key)
 
-    num_of_runs = len([fn for fn in os.listdir(record_dir) if fn.startswith(fname)])
-    fname = f'{fname}-{num_of_runs}.json'
+    num_of_runs = len([fn for fn in os.listdir(params_dir)])
 
-    with open(os.path.join(record_dir, fname), 'w') as fp:
+    with open(os.path.join(params_dir, f'{num_of_runs}.json'), 'w') as fp:
         json.dump(args, fp, indent=4)
 
 
@@ -65,6 +73,11 @@ def plot_learning_curves(history_path):
     """Read history csv file and plot learning curves."""
 
     history = pd.read_csv(history_path)
+    record_dir = os.path.dirname(history_path)
+    curves_dir = os.path.join(record_dir, 'curves')
+
+    if not os.path.exists(curves_dir):
+        os.mkdir(curves_dir)
 
     for key in history.columns:
         if key.startswith('val_'):
@@ -82,4 +95,4 @@ def plot_learning_curves(history_path):
         plt.xlabel('Epoch')
         plt.legend(['Train', 'Val'])
         plt.grid(True)
-        plt.savefig(os.path.join(os.path.dirname(history_path), f'{key}.png'))
+        plt.savefig(os.path.join(curves_dir, f'{key}.png'))
