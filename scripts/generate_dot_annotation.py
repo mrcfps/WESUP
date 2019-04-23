@@ -1,10 +1,7 @@
-"""
-Utility script for generating dataset with dot annotation.
-"""
-
 import argparse
 import csv
 import os
+import random
 from shutil import copytree
 
 import numpy as np
@@ -18,21 +15,8 @@ BG_SAMPLE_RATIO = 1e-4
 
 
 def _sample_within_region(region_mask):
-    while True:
-        # get the bounds of this region
-        up = max(0, region_mask.any(axis=1).nonzero()[0][0])
-        bottom = min(region_mask.shape[0] - 1,
-                     region_mask.any(axis=1).nonzero()[0][-1])
-        left = max(0, region_mask.any(axis=0).nonzero()[0][0])
-        right = min(region_mask.shape[1] - 1,
-                    region_mask.any(axis=0).nonzero()[0][-1])
-
-        rand_i = np.random.randint(up, bottom + 1)
-        rand_j = np.random.randint(left, right + 1)
-
-        if region_mask[rand_i, rand_j]:
-            # point within the region is found, return it
-            return rand_i, rand_j
+    xs, ys = np.where(region_mask)
+    return random.choice(np.c_[xs, ys])
 
 
 def _generate_points(mask, label_percent=0.5):
@@ -46,8 +30,8 @@ def _generate_points(mask, label_percent=0.5):
             # if background, randomly sample some points
             sample_num = int(class_mask.sum() * BG_SAMPLE_RATIO)
             for _ in range(sample_num):
-                points.append(
-                    [*_sample_within_region(class_mask), class_label])
+                point = _sample_within_region(class_mask)
+                points.append([*point, class_label])
         else:
             class_mask = label(class_mask)
 
@@ -57,12 +41,17 @@ def _generate_points(mask, label_percent=0.5):
             num_selected = int(np.ceil(len(region_indexes) * label_percent))
             region_indexes = region_indexes[:num_selected]
 
-            points.extend([
-                [*_sample_within_region(class_mask == idx), class_label]
-                for idx in region_indexes
-            ])
+            for idx in region_indexes:
+                point = _sample_within_region(class_mask == idx)
+                points.append([*point, class_label])
 
     return points
+
+
+def _write_points_to_csv(points, file_path):
+    with open(j(dst_label_dir, f'{basename}.csv'), 'w') as fp:
+        writer = csv.writer(fp)
+        writer.writerows(points)
 
 
 if __name__ == '__main__':
