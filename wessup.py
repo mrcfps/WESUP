@@ -65,7 +65,7 @@ class Wessup(nn.Module):
         self.classifier = nn.Sequential(
             self._build_fc_layer(self.extractor.sp_feature_length, 1024),
             self._build_fc_layer(1024, 1024),
-            self._build_fc_layer(256, 32),
+            self._build_fc_layer(1024, 32),
             nn.Linear(32, config.N_CLASSES),
         ).to(device)
 
