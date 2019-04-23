@@ -110,11 +110,25 @@ class FullAnnotationDataset(Dataset):
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
+        self.cache_dir = os.path.join(root_dir, 'cache')
+        if not os.path.exists(self.cache_dir):
+            os.mkdir(self.cache_dir)
+
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
+    def _cache(self, basename, **data):
+        torch.save(f'{basename}.pth', **data)
+
     def __getitem__(self, idx):
         idx = idx // self.patches_per_img
+        code = os.path.splitext(os.path.basename(self.img_paths[idx]))[0]
+        cache_path = os.path.join(self.cache_dir, f'{code}.pth')
+
+        if not self.train and os.path.exists(cache_path):
+            cache = torch.load(cache_path)
+            return cache['img'], cache['mask'], cache['sp_maps'], cache['sp_labels']
+
         img = Image.open(self.img_paths[idx])
         mask = Image.open(self.mask_paths[idx])
 
@@ -128,6 +142,14 @@ class FullAnnotationDataset(Dataset):
         mask = torch.LongTensor(np.array(mask))
         sp_maps = torch.Tensor(sp_maps)
         sp_labels = torch.LongTensor(sp_labels)
+
+        if not self.train:
+            torch.save({
+                'img': img,
+                'mask': mask,
+                'sp_maps': sp_maps,
+                'sp_labels': sp_labels,
+            }, cache_path)
 
         return img, mask, sp_maps, sp_labels
 
