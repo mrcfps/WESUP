@@ -17,8 +17,8 @@ from wessup import Wessup
 from utils import record
 from utils import predict_whole_patch
 from utils.data import get_trainval_dataloaders
-from utils.metrics import superpixel_accuracy
-from utils.metrics import pixel_accuracy
+from utils.metrics import accuracy
+from utils.metrics import dice
 from utils.history import HistoryTracker
 
 # which device to use
@@ -83,12 +83,13 @@ def train_one_iteration(model, optimizer, phase, *data):
             loss.backward()
             optimizer.step()
 
-    metrics['sp_acc'] = superpixel_accuracy(sp_pred, sp_labels).item()
+    metrics['sp_acc'] = accuracy(sp_pred.argmax(dim=-1), sp_labels)
 
     if mask is not None:
         mask = mask.to(device).squeeze()
         pred_mask = predict_whole_patch(sp_pred, sp_maps)
-        metrics['pixel_acc'] = pixel_accuracy(pred_mask, mask).item()
+        metrics['pixel_acc'] = accuracy(pred_mask, mask)
+        metrics['dice'] = dice(pred_mask, mask)
 
     tracker.step(metrics)
 
