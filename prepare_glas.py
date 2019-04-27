@@ -110,6 +110,7 @@ if __name__ == '__main__':
 
     train_dir = j(args.output, 'train')
     val_dir = j(args.output, 'val')
+    val_whole_dir = j(args.output, 'val-whole')
     testA_dir = j(args.output, 'testA')
     testB_dir = j(args.output, 'testB')
 
@@ -117,7 +118,10 @@ if __name__ == '__main__':
     print('Training data is done.')
 
     prepare_images(args.dataset_path, val_dir, val_set, split=True)
-    print('Validation data is done.')
+    print('Validation data (patches) is done.')
+
+    prepare_images(args.dataset_path, val_whole_dir, val_set)
+    print('Validation data (whole images) is done.')
 
     prepare_images(args.dataset_path, testA_dir, testA_set)
     print('TestA data is done.')
