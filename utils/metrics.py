@@ -12,13 +12,15 @@ from scipy import stats
 from scipy.spatial.distance import directed_hausdorff
 from skimage.measure import label
 
+import config
+
 
 def convert_to_numpy(func):
     """Decorator for converting each argument to numpy array."""
 
     def wrapper(*args):
         args = [
-            arg.detach().numpy() if isinstance(arg, torch.Tensor) else arg
+            arg.detach().numpy() if torch.is_tensor(arg) else arg
             for arg in args
         ]
         return func(*args)
@@ -127,7 +129,7 @@ def detection_f1(S, G, overlap_threshold=0.5):
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
 
-    return (2*precision*recall) / (precision + recall)
+    return (2*precision*recall) / (precision + recall + config.EPSILON)
 
 
 def dice(S, G):
@@ -141,9 +143,12 @@ def dice(S, G):
         dice_score: segmentation dice score
     """
 
-    dice_score = 2 * (G * S).sum().float() / (G.sum() + S.sum()).float()
-
-    return dice_score.item()
+    if torch.is_tensor(S) and torch.is_tensor(G):
+        S, G = S.float(), G.float()
+        dice_score = 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
+        return dice_score.item()
+    else:
+        return 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
 
 
 @convert_to_numpy
@@ -269,7 +274,7 @@ def object_hausdorff(S, G):
         if intersect.size > 0:
             Gi = G == stats.mode(intersect)[0]
             hausdorff_sum += omegai * hausdorff(Si, Gi)
-        else:
+        elif len(G_labels) > 0:
             min_distance = min(hausdorff(Si, G == gt_idx) for gt_idx in G_labels)
             hausdorff_sum += omegai * min_distance
 
@@ -285,7 +290,7 @@ def object_hausdorff(S, G):
         if intersect.size > 0:
             tilde_Si = S == stats.mode(intersect)[0]
             tilde_hausdorff_sum += tilde_omegai * hausdorff(tilde_Si, tilde_Gi)
-        else:
+        elif len(S_labels) > 0:
             min_distance = min(hausdorff(S == seg_idx, tilde_Gi) for seg_idx in S_labels)
             tilde_hausdorff_sum += tilde_omegai * min_distance
 
