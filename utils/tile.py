@@ -5,33 +5,34 @@ Utilities for (non-)overlapping-tile (or sliding window) predictions.
 import numpy as np
 
 
-def _get_extended_image_size(height, width, patch_size, stride):
-    """Calculate extended height and width for given stride."""
+def compute_patches_grid_shape(img, patch_size, stride):
+    """Calculate height and width of patches grid needed to predict an image."""
 
-    ext_height, ext_width = 0, 0
+    height, width = img.shape[:2]
+    n_h = np.ceil((height - patch_size) / stride + 1)
+    n_w = np.ceil((width - patch_size) / stride + 1)
 
-    def sliding_distance(n_windows, window_size, stride):
-        return window_size * n_windows - (window_size - stride) * (n_windows - 1)
+    return int(n_h), int(n_w)
 
-    if height < patch_size:
-        ext_height = patch_size
-    else:
-        for n in range(height):
-            distance = sliding_distance(n, patch_size, stride)
-            if distance > height:
-                ext_height = distance
-                break
+def compute_padded_image_size(img, patch_size, stride):
+    """Calculate padded height and width."""
 
-    if width < patch_size:
-        ext_width = patch_size
-    else:
-        for n in range(width):
-            distance = sliding_distance(n, patch_size, stride)
-            if distance > width:
-                ext_width = distance
-                break
+    n_h, n_w = compute_patches_grid_shape(img, patch_size, stride)
+    ext_h = patch_size + stride * (n_h - 1)
+    ext_w = patch_size + stride * (n_w - 1)
 
-    return ext_height, ext_width
+    return ext_h, ext_w
+
+
+def pad_image(img, patch_size, stride):
+    """Pad the image with zeros so that sliding windows won't move out."""
+
+    height, width, n_channels = img.shape
+    ext_height, ext_width = compute_padded_image_size(img, patch_size, stride)
+    ext_img = np.zeros((ext_height, ext_width, n_channels), dtype='uint8')
+    ext_img[:height, :width] = img
+
+    return ext_img
 
 
 def divide_image_to_patches(img, patch_size, stride=None, pad=True):
@@ -47,18 +48,11 @@ def divide_image_to_patches(img, patch_size, stride=None, pad=True):
     if len(img.shape) == 2:  # this is a mask
         img = np.expand_dims(img, -1)
 
-    height, width, n_channels = img.shape
+    height, width = img.shape[:2]
 
     if pad:
-        # extend the original image so that the sliding window won't move out of the image
-        ext_height, ext_width = _get_extended_image_size(
-            height, width, patch_size, stride)
-        ext_img = np.zeros((ext_height, ext_width, n_channels))
-        ext_img[:height, :width] = img
-
-        # overwrite original values
-        img = ext_img
-        height, width = ext_height, ext_width
+        img = pad_image(img, patch_size, stride)
+        height, width = img.shape[:2]
 
     x = []
 
@@ -69,23 +63,32 @@ def divide_image_to_patches(img, patch_size, stride=None, pad=True):
     return np.array(x).astype('uint8')
 
 
-def combine_patches_to_image(y_pred, img, stride):
-    """Combine patches back to a single image (mask)."""
+def combine_patches_to_image(patches, target_size, stride):
+    """Combine patches back to a single image (mask).
+
+    Arguments:
+        patches: numpy array with shape (n_patches, patch_size, patch_size, n_channels)
+        target_size: a tuple containing height and width of combined image
+        stride: stride to use when combining patches
+
+    Returns:
+        img: combined image
+    """
 
     counter = 0
-    height, width = img.shape[:2]
-    output_size = y_pred.shape[1]
+    patch_size = patches.shape[1]
+    height, width = target_size
 
     # The last channel is the number of overlapping patches for a given pixel,
     # used for averaging predictions from multiple windows.
-    combined = np.zeros((height, width, y_pred.shape[-1] + 1))
+    combined = np.zeros((height, width, patches.shape[-1] + 1))
 
-    for i in range(0, height - output_size + 1, stride):
-        for j in range(0, width - output_size + 1, stride):
-            patch = combined[i:i + output_size, j:j + output_size, :-1]
-            overlaps = combined[i:i + output_size, j:j + output_size, -1:]
-            patch = (patch * overlaps + y_pred[counter]) / (overlaps + 1)
-            combined[i:i + output_size, j:j + output_size, :-1] = patch
+    for i in range(0, height - patch_size + 1, stride):
+        for j in range(0, width - patch_size + 1, stride):
+            patch = combined[i:i + patch_size, j:j + patch_size, :-1]
+            overlaps = combined[i:i + patch_size, j:j + patch_size, -1:]
+            patch = (patch * overlaps + patches[counter]) / (overlaps + 1)
+            combined[i:i + patch_size, j:j + patch_size, :-1] = patch
             overlaps += 1.
             counter += 1
 

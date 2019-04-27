@@ -5,13 +5,15 @@ import glob
 
 import numpy as np
 from PIL import Image
-from skimage.segmentation import slic
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 
 import config
+from .tile import pad_image
+from .tile import compute_patches_grid_shape
+from .preprocessing import segment_superpixels
 
 
 def _list_images(path):
@@ -50,59 +52,6 @@ def _transform_and_crop(img, mask=None):
     return (img, mask), (up, left)
 
 
-def _segment_superpixels(img, label):
-    """Segment superpixels of a given image and return segment maps and their labels.
-
-    This function is applicable to two scenarios:
-
-    1. Full annotation: `label` is a mask (`PIL.Image.Image`) with the same height and width as `img`.
-        Superpixel maps and their labels will be returned.
-    2. Dot annotation: `label` is n_l x 3 array (n_l is the number of points, and each point
-        contains information about its x and y coordinates and label). Superpixel maps
-        (with n_l labeled superpixels coming first) and n_l labels will be returned.
-    """
-
-    segments = slic(img, n_segments=config.SLIC_N_SEGMENTS,
-                    compactness=config.SLIC_COMPACTNESS)
-
-    sp_num = segments.max() + 1
-
-    if isinstance(label, Image.Image):
-        label = np.array(label)
-        label = np.concatenate([np.expand_dims(label == i, -1)
-                                for i in range(config.N_CLASSES)], axis=-1)
-        sp_labels = np.array([
-            (label * np.expand_dims(segments == i, -1)
-             ).sum(axis=(0, 1)) / np.sum(segments == i)
-            for i in range(sp_num)
-        ])
-        sp_labels = np.argmax(
-            sp_labels == sp_labels.max(axis=-1, keepdims=True), axis=-1)
-        sp_idx_list = range(sp_num)
-    else:
-        labeled_sps, sp_labels = [], []
-
-        for point in label:
-            i, j, class_ = point
-            try:
-                if segments[i, j] not in labeled_sps:
-                    labeled_sps.append(segments[i, j])
-                    sp_labels.append(class_)
-            except IndexError:
-                # point is outside this patch, ignore it
-                pass
-
-        unlabeled_sps = list(set(np.unique(segments)) - set(labeled_sps))
-        sp_idx_list = labeled_sps + unlabeled_sps
-
-    # stacking normalized superpixel segment maps
-    sp_maps = np.concatenate(
-        [np.expand_dims(segments == idx, 0) for idx in sp_idx_list])
-    sp_maps = sp_maps / sp_maps.sum(axis=0, keepdims=True)
-
-    return sp_maps, sp_labels
-
-
 class FullAnnotationDataset(Dataset):
     """Segmentation dataset with mask-level (full) annotation."""
 
@@ -116,46 +65,24 @@ class FullAnnotationDataset(Dataset):
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
-        self.cache_dir = os.path.join(root_dir, 'cache')
-        if not os.path.exists(self.cache_dir):
-            os.mkdir(self.cache_dir)
-
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
-    def _cache(self, basename, **data):
-        torch.save(f'{basename}.pth', **data)
-
     def __getitem__(self, idx):
         idx = idx // self.patches_per_img
-        code = os.path.splitext(os.path.basename(self.img_paths[idx]))[0]
-        cache_path = os.path.join(self.cache_dir, f'{code}.pth')
-
-        if not self.train and os.path.exists(cache_path):
-            cache = torch.load(cache_path)
-            return cache['img'], cache['mask'], cache['sp_maps'], cache['sp_labels']
-
         img = Image.open(self.img_paths[idx])
         mask = Image.open(self.mask_paths[idx])
 
         if self.train:
             (img, mask), _ = _transform_and_crop(img, mask)
 
-        sp_maps, sp_labels = _segment_superpixels(img, mask)
+        sp_maps, sp_labels = segment_superpixels(img, mask)
 
         # convert to tensors
         img = TF.to_tensor(img)
         mask = torch.LongTensor(np.array(mask))
         sp_maps = torch.Tensor(sp_maps)
         sp_labels = torch.LongTensor(sp_labels)
-
-        if not self.train:
-            torch.save({
-                'img': img,
-                'mask': mask,
-                'sp_maps': sp_maps,
-                'sp_labels': sp_labels,
-            }, cache_path)
 
         return img, mask, sp_maps, sp_labels
 
@@ -187,7 +114,7 @@ class DotAnnotationDataset(Dataset):
         label[:, 0] -= up
         label[:, 1] -= left
 
-        sp_maps, sp_labels = _segment_superpixels(img, label)
+        sp_maps, sp_labels = segment_superpixels(img, label)
 
         # convert to tensors
         img = TF.to_tensor(img)
@@ -196,6 +123,59 @@ class DotAnnotationDataset(Dataset):
 
         # the second return value is the missing mask for convenience
         return img, sp_maps, sp_labels
+
+
+class WholeImageDataset(Dataset):
+    """Dataset with whole size images."""
+
+    def __init__(self, root_dir):
+        self.img_paths = _list_images(os.path.join(root_dir, 'images'))
+
+        if os.path.exists(os.path.join(root_dir, 'masks')):
+            self.masks = [
+                np.array(Image.open(mask_path))
+                for mask_path in _list_images(os.path.join(root_dir, 'masks'))
+            ]
+        else:
+            self.masks = None
+
+        # patches grid shape for each image
+        self.patches_grids = [
+            compute_patches_grid_shape(np.array(Image.open(img_path)),
+                                       config.PATCH_SIZE, config.INFER_STRIDE)
+            for img_path in self.img_paths
+        ]
+
+        # number of patches for each image
+        self.patches_nums = [n_h * n_w for n_h, n_w in self.patches_grids]
+
+        # sequence for identifying image index from patch index
+        self.patches_numseq = np.cumsum(self.patches_nums)
+
+    def __len__(self):
+        return sum(self.patches_nums)
+
+    def __getitem__(self, patch_idx):
+        img_idx = self.patch2img(patch_idx)
+        img = np.array(Image.open(self.img_paths[img_idx]))
+        img = pad_image(img, config.PATCH_SIZE, config.INFER_STRIDE)
+
+        if img_idx > 0:
+            # patch index WITHIN this image
+            patch_idx -= self.patches_numseq[img_idx - 1]
+
+        _, n_w = self.patches_grids[img_idx]
+        up = (patch_idx // n_w) * config.INFER_STRIDE
+        left = (patch_idx % n_w) * config.INFER_STRIDE
+
+        patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
+
+        return TF.to_tensor(patch), torch.Tensor(segment_superpixels(patch))
+
+    def patch2img(self, patch_idx):
+        """Identify which image this patch belongs to."""
+
+        return np.argmax(self.patches_numseq > patch_idx)
 
 
 def get_trainval_dataloaders(root_dir, num_workers):
