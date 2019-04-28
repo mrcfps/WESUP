@@ -23,7 +23,14 @@ full_anno_glas
 │   └── masks
 │       ├── train-1.png
 │       └── train-2.png
-└── val
+├── val
+│   ├── images
+│   │   ├── val-1.png
+│   │   └── val-2.png
+│   └── masks
+│       ├── val-1.png
+│       └── val-2.png
+└── val-whole
     ├── images
     │   ├── val-1.png
     │   └── val-2.png
@@ -31,6 +38,12 @@ full_anno_glas
         ├── val-1.png
         └── val-2.png
 ```
+
+Note that:
+
+- `train` directory contains original images and masks
+- `val` directory contains cropped patches to be validated
+- `val-whole` directory contains whole images and masks to be validated
 
 To generate weakly-supervised dataset with dot annotation, run the following command:
 
@@ -72,11 +85,12 @@ p2_top,p2_left,p2_label
 ### Training from scratch
 
 ```bash
-$ python train.py /path/to/dataset -w 5 -e 50 -j 4
+$ python train.py /path/to/dataset -b resnet50 -w 5 -e 50 -j 4
 ```
 
 Notes on important arguments:
 
+- `-b` or `--backbone` takes a string representing the CNN backbone, such as `vgg13` or `resnet50`. Ccurrently, only VGG Family (`vgg11`, `vgg13`, `vgg16` and `vgg19`), ResNet family (`resnet18`, `resnet34`, `resnet50`, `resnet101` and `resnet152`) and DenseNet family (`densenet121`, `densenet161`, `densenet169` and `densenet201`) are supported.
 - `-w` or `--warmup` takes an integer, which is the number of warmup epochs where only parameters of the MLP classifier is updated.
 - `-e` or `--epochs` takes an integer, which is the number of training epochs
 - `-j` or `--jobs` is the number of workers for data preprocessing and loading. Since SLIC operation can take nonnegligible amount of time, more workers can bring about significant speedup for training
@@ -103,6 +117,11 @@ records/20190423-1122-AM
 │   ├── loss.png
 │   ├── pixel_acc.png
 │   └── sp_acc.png
+├── viz
+│   ├── metrics.csv
+│   ├── train_1.png
+│   ├── train_1.pred.png
+│   └── train_1.gt.png
 ├── history.csv
 ├── params
 │   ├── 0.json
@@ -113,5 +132,14 @@ records/20190423-1122-AM
 - `checkpoints` directory stores all training checkpoints
 - `curves` stores learning curves for loss and all metrics
 - `params` stores CLI and configuration parameters
+- `viz` contains visualization of model predictions and whole image metrics
 - `source` stores a snapshot of all source code file
 - `history.csv` records the training history
+
+## Inference
+
+```bash
+$ python infer.py /path/to/test/data -c /path/to/checkpoint -o prediction -j 4
+```
+
+Test images should be placed in a subdirectory named `images`.
