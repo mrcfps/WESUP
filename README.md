@@ -90,7 +90,7 @@ $ python train.py /path/to/dataset -b resnet50 -w 5 -e 50 -j 4
 
 Notes on important arguments:
 
-- `-b` or `--backbone` takes a string representing the CNN backbone, such as `vgg13` or `resnet50`. Ccurrently, only VGG Family (`vgg11`, `vgg13`, `vgg16` and `vgg19`), ResNet family (`resnet18`, `resnet34`, `resnet50`, `resnet101` and `resnet152`) and DenseNet family (`densenet121`, `densenet161`, `densenet169` and `densenet201`) are supported.
+- `-b` or `--backbone` takes a string representing the CNN backbone, such as `vgg13` or `resnet50`. Currently, only VGG Family (`vgg11`, `vgg13`, `vgg16` and `vgg19`), ResNet family (`resnet18`, `resnet34`, `resnet50`, `resnet101` and `resnet152`) and DenseNet family (`densenet121`, `densenet161`, `densenet169` and `densenet201`) are supported.
 - `-w` or `--warmup` takes an integer, which is the number of warmup epochs where only parameters of the MLP classifier is updated.
 - `-e` or `--epochs` takes an integer, which is the number of training epochs
 - `-j` or `--jobs` is the number of workers for data preprocessing and loading. Since SLIC operation can take nonnegligible amount of time, more workers can bring about significant speedup for training
