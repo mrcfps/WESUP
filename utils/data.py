@@ -188,7 +188,7 @@ class WholeImageDataset(Dataset):
         cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
         sp_maps, sp_labels = segment_superpixels(patch, cache=cache)
 
-        return TF.to_tensor(patch), torch.Tensor(sp_maps))
+        return TF.to_tensor(patch), torch.Tensor(sp_maps)
 
     def patch2img(self, patch_idx):
         """Identify which image this patch belongs to."""
