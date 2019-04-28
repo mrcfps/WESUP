@@ -63,25 +63,36 @@ def divide_image_to_patches(img, patch_size, stride=None, pad=True):
     return np.array(x).astype('uint8')
 
 
-def combine_patches_to_image(patches, target_size, stride):
+def combine_patches_to_image(patches, grid_shape, target_size=None, stride=None):
     """Combine patches back to a single image (mask).
 
     Arguments:
         patches: numpy array with shape (n_patches, patch_size, patch_size, n_channels)
-        target_size: a tuple containing height and width of combined image
+        grid_shape: a tuple containing number of patches along height and width respectively
+        target_size: a tuple containing target height and width of combined image
         stride: stride to use when combining patches
 
     Returns:
         img: combined image
     """
 
-    counter = 0
+    n_h, n_w = grid_shape
+    if len(patches) != n_h * n_w:
+        raise ValueError(
+            f'{len(patches)} patches cannot be combined with grid shape {grid_shape}'
+        )
+
     patch_size = patches.shape[1]
-    height, width = target_size
+    stride = stride or patch_size
+    height = patch_size + stride * (n_h - 1)
+    width = patch_size + stride * (n_w - 1)
 
     # The last channel is the number of overlapping patches for a given pixel,
     # used for averaging predictions from multiple windows.
     combined = np.zeros((height, width, patches.shape[-1] + 1))
+
+    # counter for patch index
+    counter = 0
 
     for i in range(0, height - patch_size + 1, stride):
         for j in range(0, width - patch_size + 1, stride):
@@ -91,5 +102,8 @@ def combine_patches_to_image(patches, target_size, stride):
             combined[i:i + patch_size, j:j + patch_size, :-1] = patch
             overlaps += 1.
             counter += 1
+
+    if target_size:
+        height, width = target_size
 
     return combined[:height, :width, :-1]
