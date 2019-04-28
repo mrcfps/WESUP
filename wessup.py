@@ -132,7 +132,7 @@ class Wessup(nn.Module):
         try:
             self.backbone = models.__dict__[backbone_name](pretrained=True)
         except KeyError:
-            raise ValueError(f'unsupported backbone {backbone}.')
+            raise ValueError(f'unsupported backbone {backbone_name}.')
 
         # remove classifier (if it's VGG or DenseNet)
         if hasattr(self.backbone, 'features'):

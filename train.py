@@ -177,6 +177,7 @@ if __name__ == '__main__':
 
         # create new model
         wessup = Wessup(args.backbone)
+        wessup.to(device)
 
         if args.warmup > 0:
             # only optimize classifier of wessup

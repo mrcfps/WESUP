@@ -10,7 +10,6 @@ from collections import defaultdict
 
 import torch
 from torch.utils.data import DataLoader
-from torchvision.models import vgg13
 
 import numpy as np
 from tqdm import tqdm
@@ -106,12 +105,9 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
 
             if evaluate:
                 ground_truth = dataset.masks[img_idx]
-                # metrics['detection_f1'].append(detection_f1(whole_pred, ground_truth))
-                # metrics['object_dice'].append(object_dice(whole_pred, ground_truth))
-                # metrics['object_hausdorff'].append(object_hausdorff(whole_pred, ground_truth))
-                metrics['detection_f1'].append(np.random.rand())
-                metrics['object_dice'].append(np.random.rand())
-                metrics['object_hausdorff'].append(np.random.rand())
+                metrics['detection_f1'].append(detection_f1(whole_pred, ground_truth))
+                metrics['object_dice'].append(object_dice(whole_pred, ground_truth))
+                metrics['object_hausdorff'].append(object_hausdorff(whole_pred, ground_truth))
 
             if viz_dir is not None:
                 img_name = os.path.basename(dataset.img_paths[img_idx])
@@ -153,25 +149,23 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
+    parser.add_argument('-c', '--checkpoint', required=True, help='Path to checkpoint')
     parser.add_argument('--no-gpu', action='store_true', default=False,
                         help='Whether to avoid using gpu')
     parser.add_argument('-o', '--output', default='viz',
                         help='Path to store visualization and metrics result')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
-                        help='Number of CPUs to use for preprocessing ')
-    parser.add_argument('-m', '--model', help='Path to saved model or checkpoint')
+                        help='Number of CPUs to use for preprocessing')
 
     args = parser.parse_args()
 
     device = 'cpu' if args.no_gpu and not torch.cuda.is_available() else 'cuda'
-    wessup = Wessup(vgg13().features, device)
 
-    if args.model:
-        ckpt = torch.load(args.model)
-        if 'model_state_dict' in ckpt:
-            ckpt = ckpt['model_state_dict']
-        wessup.load_state_dict(ckpt)
-        print(f'Loaded model from {args.model}.')
+    ckpt = torch.load(args.checkpoint)
+    wessup = Wessup(ckpt['backbone'])
+    wessup.to(device)
+    wessup.load_state_dict(ckpt['model_state_dict'])
+    print(f'Loaded model from {args.model}.')
 
     test_whole_images(wessup, args.dataset_path, args.output,
                       device=device, num_workers=args.jobs)
