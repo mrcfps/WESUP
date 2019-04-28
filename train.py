@@ -2,8 +2,6 @@ import argparse
 import os
 import warnings
 
-warnings.filterwarnings('ignore')
-
 from tqdm import tqdm
 
 import torch
@@ -15,11 +13,14 @@ from torchvision.models import vgg13
 import config
 from wessup import Wessup
 from utils import record
-from utils import predict_whole_patch
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
 from utils.metrics import dice
 from utils.history import HistoryTracker
+from infer import test_whole_images
+from infer import compute_mask_with_superpixel_prediction
+
+warnings.filterwarnings('ignore')
 
 # which device to use
 device = None
@@ -87,7 +88,7 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     if mask is not None:
         mask = mask.to(device).squeeze()
-        pred_mask = predict_whole_patch(sp_pred, sp_maps)
+        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
         metrics['pixel_acc'] = accuracy(pred_mask, mask)
         metrics['dice'] = dice(pred_mask, mask)
 
@@ -198,7 +199,16 @@ if __name__ == '__main__':
     print('\nTraining Stage')
     print('=' * 20)
     total_epochs = args.epochs + initial_epoch - 1
+
     for epoch in range(initial_epoch, total_epochs + 1):
         print('\nEpoch {}/{}'.format(epoch, total_epochs))
         print('-' * 10)
         train_one_epoch(wessup, optimizer, epoch)
+
+        # test on whole images
+        if epoch % config.WHOLE_IMAGE_TEST_PERIOD == 0:
+            viz_dir = os.path.join(record_dir, 'viz')
+            test_whole_images(
+                wessup, os.path.join(args.dataset_path, 'val-whole'),
+                viz_dir=viz_dir, epoch=epoch, device=device, num_workers=args.jobs
+            )

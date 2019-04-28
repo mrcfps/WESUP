@@ -33,6 +33,10 @@ def prepare_record_dir():
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
+    viz_dir = os.path.join(record_dir, 'viz')
+    if not os.path.exists(viz_dir):
+        os.mkdir(viz_dir)
+
     return record_dir
 
 
