@@ -2,6 +2,7 @@ import csv
 import os
 import random
 import glob
+from shutil import rmtree
 
 import numpy as np
 from PIL import Image
@@ -65,18 +66,26 @@ class FullAnnotationDataset(Dataset):
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
+        self.cache_dir = os.path.join(root_dir, 'cache')
+
+        # remove (possibly) existent cache
+        if os.path.exists(self.cache_dir):
+            rmtree(self.cache_dir)
+        os.mkdir(self.cache_dir)
+
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
-    def __getitem__(self, idx):
-        idx = idx // self.patches_per_img
-        img = Image.open(self.img_paths[idx])
-        mask = Image.open(self.mask_paths[idx])
+    def __getitem__(self, patch_idx):
+        img_idx = patch_idx // self.patches_per_img
+        img = Image.open(self.img_paths[img_idx])
+        mask = Image.open(self.mask_paths[img_idx])
 
         if self.train:
             (img, mask), _ = _transform_and_crop(img, mask)
 
-        sp_maps, sp_labels = segment_superpixels(img, mask)
+        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
+        sp_maps, sp_labels = segment_superpixels(img, mask, cache=cache)
 
         # convert to tensors
         img = TF.to_tensor(img)
@@ -152,6 +161,13 @@ class WholeImageDataset(Dataset):
         # sequence for identifying image index from patch index
         self.patches_numseq = np.cumsum(self.patches_nums)
 
+        self.cache_dir = os.path.join(root_dir, 'cache')
+
+        # remove (possibly) existent cache
+        if os.path.exists(self.cache_dir):
+            rmtree(self.cache_dir)
+        os.mkdir(self.cache_dir)
+
     def __len__(self):
         return sum(self.patches_nums)
 
@@ -169,8 +185,10 @@ class WholeImageDataset(Dataset):
         left = (patch_idx % n_w) * config.INFER_STRIDE
 
         patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
+        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
+        sp_maps, sp_labels = segment_superpixels(patch, cache=cache)
 
-        return TF.to_tensor(patch), torch.Tensor(segment_superpixels(patch))
+        return TF.to_tensor(patch), torch.Tensor(sp_maps))
 
     def patch2img(self, patch_idx):
         """Identify which image this patch belongs to."""
