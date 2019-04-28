@@ -1,3 +1,7 @@
+"""
+Training module.
+"""
+
 import argparse
 import os
 import warnings
@@ -46,6 +50,8 @@ def build_cli_parser():
                         help='Number of warmup epochs (freeze CNN) before training')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preparing superpixels')
+    parser.add_argument('-b', '--backbone', default='vgg13',
+                        help='CNN backbone to use (such as vgg13, resnet50 and densenet121)')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
     parser.add_argument('--lr', type=float, default=0.01,
@@ -126,6 +132,7 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
                 record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
             torch.save({
                 'epoch': epoch,
+                'backbone': wessup.backbone_name,
                 'model_state_dict': wessup.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
             }, ckpt_path)
@@ -148,9 +155,10 @@ if __name__ == '__main__':
         checkpoint = torch.load(args.resume_ckpt)
 
         # load previous model states
-        extractor = vgg13().features
-        wessup = Wessup(extractor, device=device)
+        backbone = checkpoint['backbone']
+        wessup = Wessup(backbone)
         wessup.load_state_dict(checkpoint['model_state_dict'])
+        wessup.to(device)
 
         # load previous optimizer states and set learning rate to given value
         optimizer = optim.SGD(
@@ -161,14 +169,14 @@ if __name__ == '__main__':
         optimizer.param_groups[0]['lr'] = args.lr
 
         initial_epoch = checkpoint['epoch'] + 1
-    else:
+    else:  # train a new model
         record_dir = record.prepare_record_dir()
         record.copy_source_files(record_dir)
 
         tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
 
         # create new model
-        wessup = Wessup(vgg13(pretrained=True).features, device=device)
+        wessup = Wessup(args.backbone)
 
         if args.warmup > 0:
             # only optimize classifier of wessup
