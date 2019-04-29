@@ -152,11 +152,12 @@ class Wessup(nn.Module):
             self._build_fc_layer(1024, 1024),
             self._build_fc_layer(1024, 32),
             nn.Linear(32, config.N_CLASSES),
+            nn.Softmax()
         )
 
         # label propagation input features
         self.lp_input_features = None
-        self.classifier[-1].register_forward_hook(self._hook_fn)
+        self.classifier[-2].register_forward_hook(self._hook_fn)
 
     def _hook_fn(self, module, input, output):
         self.lp_input_features = input[0]

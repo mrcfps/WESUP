@@ -121,7 +121,7 @@ class PatchDataset(Dataset):
         # convert to tensors
         img = TF.to_tensor(img)
         sp_maps = torch.Tensor(sp_maps)
-        sp_labels = torch.LongTensor(sp_labels)
+        sp_labels = torch.Tensor(sp_labels)
 
         if mask is not None:
             mask = torch.LongTensor(np.array(mask))

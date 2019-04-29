@@ -11,7 +11,6 @@ from tqdm import tqdm
 
 import torch
 import torch.optim as optim
-import torch.nn.functional as F
 
 import config
 from wessup import Wessup
@@ -61,6 +60,35 @@ def build_cli_parser():
     return parser
 
 
+def cross_entropy(y_hat, y_true, weight=None):
+    """Semi-supervised cross entropy loss function.
+
+    Args:
+        y_hat: prediction tensor with size (N, c), where c is the number of classes
+        y_true: label tensor with size (N, c). A sample won't be counted into loss
+            if its label is all zeros.
+        weight: class weight tensor with size (c,)
+
+    Returns:
+        cross_entropy: cross entropy loss computed only on samples with labels
+    """
+
+    # clamp all elements to prevent numerical overflow/underflow
+    y_hat = torch.clamp(y_hat, min=config.EPSILON, max=(1 - config.EPSILON))
+
+    # number of samples with labels
+    n_labels = torch.sum(y_true.sum(dim=1) > 0).float()
+
+    if n_labels.item() == 0:
+        return 0
+
+    ce = -y_true * torch.log(y_hat)
+    if weight is not None:
+        ce = ce * weight.unsqueeze(0)
+
+    return torch.sum(ce) / n_labels
+
+
 def train_one_iteration(model, optimizer, phase, *data):
     if len(data) == 4:  # data from `FullAnnotationDataset`
         img, mask, sp_maps, sp_labels = data
@@ -76,7 +104,7 @@ def train_one_iteration(model, optimizer, phase, *data):
     metrics = dict()
 
     # weighted cross entropy
-    ce = partial(F.cross_entropy, weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+    ce = partial(cross_entropy, weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
 
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
@@ -91,8 +119,6 @@ def train_one_iteration(model, optimizer, phase, *data):
         if phase == 'train':
             loss.backward()
             optimizer.step()
-
-    metrics['sp_acc'] = accuracy(sp_pred.argmax(dim=-1), sp_labels)
 
     if mask is not None:
         mask = mask.to(device).squeeze()

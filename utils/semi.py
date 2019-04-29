@@ -34,7 +34,7 @@ def label_propagate(X, y_l, threshold=0.95):
     max_similarities, src_indexes = W_ul.max(dim=1)
 
     # initialize y_u with zeros
-    y_u = torch.zeros(n_u, y_l.size(1))
+    y_u = torch.zeros(n_u, y_l.size(1)).to(y_l.device)
 
     # only propagate labels if maximum similarity is above the threhold
     propagated_samples = max_similarities > threshold

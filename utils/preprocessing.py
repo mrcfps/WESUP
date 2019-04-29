@@ -48,8 +48,7 @@ def segment_superpixels(img, label=None, cache=None):
              ).sum(axis=(0, 1)) / np.sum(segments == i)
             for i in range(sp_num)
         ])
-        sp_labels = np.argmax(
-            sp_labels == sp_labels.max(axis=-1, keepdims=True), axis=-1)
+        sp_labels = sp_labels == sp_labels.max(axis=-1, keepdims=True)
     elif label is not None:  # dot annotation
         labeled_sps, sp_labels = [], []
 
@@ -63,6 +62,13 @@ def segment_superpixels(img, label=None, cache=None):
                 # point is outside this patch, ignore it
                 pass
 
+        # one-hot encoding
+        sp_labels = np.array(sp_labels)
+        sp_labels = np.concatenate([
+            np.expand_dims(sp_labels == i, 0)
+            for i in range(config.N_CLASSES)
+        ]).T
+
         unlabeled_sps = list(set(np.unique(segments)) - set(labeled_sps))
         sp_idx_list = labeled_sps + unlabeled_sps
 
@@ -73,7 +79,7 @@ def segment_superpixels(img, label=None, cache=None):
     if cache is not None:
         data = {'sp_maps': sp_maps}
         if label is not None:
-            data['sp_labels'] = sp_labels
+            data['sp_labels'] = sp_labels.astype('uint8')
         np.savez(cache, **data)
 
     sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
@@ -81,4 +87,4 @@ def segment_superpixels(img, label=None, cache=None):
     if label is None:
         return sp_maps
 
-    return sp_maps, sp_labels
+    return sp_maps, sp_labels.astype('uint8')
