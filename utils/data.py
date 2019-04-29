@@ -1,3 +1,7 @@
+"""
+Data loading utilities.
+"""
+
 import csv
 import os
 import random
@@ -47,25 +51,37 @@ def _transform_and_crop(img, mask=None):
     img = TF.crop(img, up, left, patch_size, patch_size)
     mask = TF.crop(mask, up, left, patch_size, patch_size) if mask else None
 
-    if mask is None:
-        return img, (up, left)
-
     return (img, mask), (up, left)
 
 
-class FullAnnotationDataset(Dataset):
-    """Segmentation dataset with mask-level (full) annotation."""
+class PatchDataset(Dataset):
+    """Dataset with cropped patches used for training and validation."""
 
     def __init__(self, root_dir, train=True):
+        # path to images
         self.img_paths = _list_images(os.path.join(root_dir, 'images'))
-        self.mask_paths = _list_images(os.path.join(root_dir, 'masks'))
+
+        # path to mask annotations
+        self.mask_paths = None
+
+        # path to dot annotations
+        self.label_paths = None
+
+        if os.path.exists(os.path.join(root_dir, 'masks')):
+            self.mask_paths = _list_images(os.path.join(root_dir, 'masks'))
+
+        if os.path.exists(os.path.join(root_dir, 'labels')):
+            self.label_paths = glob.glob(os.path.join(root_dir, 'labels', '*.csv'))
+
         self.train = train
 
+        # compute how many patches are sampled for each image
         patch_area = config.PATCH_SIZE ** 2
         img = Image.open(self.img_paths[0])
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
+        # path to cache directory
         self.cache_dir = os.path.join(root_dir, 'cache')
 
         # remove (possibly) existent cache
@@ -79,63 +95,43 @@ class FullAnnotationDataset(Dataset):
     def __getitem__(self, patch_idx):
         img_idx = patch_idx // self.patches_per_img
         img = Image.open(self.img_paths[img_idx])
-        mask = Image.open(self.mask_paths[img_idx])
+        mask, label = None, None
+
+        if self.mask_paths is not None:
+            mask = Image.open(self.mask_paths[img_idx])
+
+        if self.label_paths is not None:
+            with open(self.label_paths[img_idx]) as fp:
+                reader = csv.reader(fp)
+                label = np.array([[int(d) for d in point] for point in reader])
 
         if self.train:
-            (img, mask), _ = _transform_and_crop(img, mask)
+            (img, mask), (up, left) = _transform_and_crop(img, mask)
+
+        if label is not None:
+            # subtract offsets from top and left
+            label[:, 0] -= up
+            label[:, 1] -= left
 
         cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
-        sp_maps, sp_labels = segment_superpixels(img, mask, cache=cache)
 
-        # convert to tensors
-        img = TF.to_tensor(img)
-        mask = torch.LongTensor(np.array(mask))
-        sp_maps = torch.Tensor(sp_maps)
-        sp_labels = torch.LongTensor(sp_labels)
-
-        return img, mask, sp_maps, sp_labels
-
-
-class DotAnnotationDataset(Dataset):
-    """Segmentation dataset with dot annotation."""
-
-    def __init__(self, root_dir):
-        self.img_paths = _list_images(os.path.join(root_dir, 'images'))
-        self.label_paths = glob.glob(os.path.join(root_dir, 'labels', '*.csv'))
-
-        patch_area = config.PATCH_SIZE ** 2
-        img = Image.open(self.img_paths[0])
-        img_area = img.height * img.width
-        self.patches_per_img = int(np.round(img_area / patch_area))
-
-    def __len__(self):
-        return len(self.img_paths) * self.patches_per_img
-
-    def __getitem__(self, idx):
-        idx = idx // self.patches_per_img
-        img, (up, left) = _transform_and_crop(Image.open(self.img_paths[idx]))
-
-        with open(self.label_paths[idx]) as fp:
-            reader = csv.reader(fp)
-            label = np.array([[int(d) for d in point] for point in reader])
-
-        # subtract offsets from top and left
-        label[:, 0] -= up
-        label[:, 1] -= left
-
-        sp_maps, sp_labels = segment_superpixels(img, label)
+        # prefer dot annotation to mask if `label` is present
+        sp_maps, sp_labels = segment_superpixels(img, label if label is not None else mask, cache=cache)
 
         # convert to tensors
         img = TF.to_tensor(img)
         sp_maps = torch.Tensor(sp_maps)
         sp_labels = torch.LongTensor(sp_labels)
 
-        # the second return value is the missing mask for convenience
+        if mask is not None:
+            mask = torch.LongTensor(np.array(mask))
+            return img, mask, sp_maps, sp_labels
+
         return img, sp_maps, sp_labels
 
 
 class WholeImageDataset(Dataset):
-    """Dataset with whole size images."""
+    """Dataset with whole images for inference."""
 
     def __init__(self, root_dir):
         self.img_paths = _list_images(os.path.join(root_dir, 'images'))
@@ -185,8 +181,8 @@ class WholeImageDataset(Dataset):
         left = (patch_idx % n_w) * config.INFER_STRIDE
 
         patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
-        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
-        sp_maps, sp_labels = segment_superpixels(patch, cache=cache)
+        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz')
+        sp_maps = segment_superpixels(patch, cache=cache)
 
         return TF.to_tensor(patch), torch.Tensor(sp_maps)
 
@@ -199,15 +195,9 @@ class WholeImageDataset(Dataset):
 def get_trainval_dataloaders(root_dir, num_workers):
     """Returns training and validation dataloaders."""
 
-    train_dir = os.path.join(root_dir, 'train')
-    val_dir = os.path.join(root_dir, 'val')
-
-    # if `labels` directory is present in `root_dir`, then it's dot annotation mode
-    is_dot_anno = os.path.exists(os.path.join(train_dir, 'labels'))
-
     datasets = {
-        'train': DotAnnotationDataset(train_dir) if is_dot_anno else FullAnnotationDataset(train_dir),
-        'val': FullAnnotationDataset(val_dir, train=False),
+        'train': PatchDataset(os.path.join(root_dir, 'train')),
+        'val': PatchDataset(os.path.join(root_dir, 'val'), train=False),
     }
 
     dataloaders = {
