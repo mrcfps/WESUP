@@ -131,6 +131,7 @@ dmypy.json
 
 records
 
+*.npz
 *.pth
 *.bmp
 *.jpe?g
