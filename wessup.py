@@ -154,6 +154,13 @@ class Wessup(nn.Module):
             nn.Linear(32, config.N_CLASSES),
         )
 
+        # label propagation input features
+        self.lp_input_features = None
+        self.classifier[-1].register_forward_hook(self._hook_fn)
+
+    def _hook_fn(self, module, input, output):
+        self.lp_input_features = input[0]
+
     def forward(self, x, sp_maps):
         # extract conv feature maps and flatten
         x = self.extractor.extract(x)

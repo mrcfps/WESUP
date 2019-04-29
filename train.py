@@ -5,18 +5,18 @@ Training module.
 import argparse
 import os
 import warnings
+from functools import partial
 
 from tqdm import tqdm
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-from torchvision.models import vgg13
+import torch.nn.functional as F
 
 import config
 from wessup import Wessup
 from utils import record
+from utils.semi import label_propagate
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
 from utils.metrics import dice
@@ -75,16 +75,18 @@ def train_one_iteration(model, optimizer, phase, *data):
     optimizer.zero_grad()
     metrics = dict()
 
+    # weighted cross entropy
+    ce = partial(F.cross_entropy, weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
         if sp_pred.size(0) > sp_labels.size(0):
             # weakly-supervised mode
-            sp_pred = sp_pred[:sp_labels.size(0)]
-            loss = F.cross_entropy(sp_pred, sp_labels,
-                                   weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+            propagated_labels = label_propagate(model.lp_input_features, sp_labels)
+            n_l = sp_labels.size(0)
+            loss = ce(sp_pred[:n_l], sp_labels) + config.PROPAGATE_WEIGHT * ce(sp_pred[n_l:], propagated_labels)
         else:  # fully-supervised mode
-            loss = F.cross_entropy(sp_pred, sp_labels,
-                                   weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+            loss = ce(sp_pred, sp_labels)
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()
