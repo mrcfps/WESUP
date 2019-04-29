@@ -2,15 +2,13 @@ import argparse
 import csv
 import os
 import random
+import sys
 from shutil import copytree
 
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from skimage.measure import label
-
-# shorthand for joining paths
-j = os.path.join
 
 BG_SAMPLE_RATIO = 5e-5
 
@@ -45,6 +43,7 @@ def _generate_points(mask, label_percent=0.5):
 
             # randomly select part of regions
             region_indexes = np.unique(class_mask)
+            region_indexes = region_indexes[region_indexes > 0]
             np.random.shuffle(region_indexes)
             num_selected = int(np.ceil(len(region_indexes) * label_percent))
             region_indexes = region_indexes[:num_selected]
@@ -56,45 +55,29 @@ def _generate_points(mask, label_percent=0.5):
     return points
 
 
-def _write_points_to_csv(points, file_path):
-    with open(j(dst_label_dir, f'{basename}.csv'), 'w') as fp:
-        writer = csv.writer(fp)
-        writer.writerows(points)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Dot annotation generator.')
-    parser.add_argument('dataset_path',
-                        help='Path to source dataset with mask-level annotation.')
+    parser.add_argument('root_dir', help='Path to data root directory with mask-level annotation.')
     parser.add_argument('-p', '--label-percent', type=float, default=0.5,
                         help='Percentage of labeled objects (regions) for each class')
-    parser.add_argument('-o', '--output', default='dot_anno_data',
-                        help='Output directory for dataset with dot annotation')
     args = parser.parse_args()
 
-    if not os.path.exists(args.output):
-        os.mkdir(args.output)
+    mask_dir = os.path.join(args.root_dir, 'masks')
+    if not os.path.exists(mask_dir):
+        print('Cannot generate dot annotation without masks.')
+        sys.exit(1)
 
-    src_train_dir = j(args.dataset_path, 'train')
-    dst_train_dir = j(args.output, 'train')
-    dst_label_dir = j(dst_train_dir, 'labels')
-    if not os.path.exists(dst_train_dir):
-        os.mkdir(dst_train_dir)
-        os.mkdir(dst_label_dir)
+    label_dir = os.path.join(args.root_dir, 'labels')
 
-    print('Copy all training images ...')
-    copytree(j(src_train_dir, 'images'), j(dst_train_dir, 'images'))
+    if not os.path.exists(label_dir):
+        os.mkdir(label_dir)
 
     print('Generate labels with dot annotation ...')
-    src_mask_dir = j(src_train_dir, 'masks')
-    for fname in tqdm(os.listdir(src_mask_dir)):
+    for fname in tqdm(os.listdir(mask_dir)):
         basename = os.path.splitext(fname)[0]
-        mask = np.array(Image.open(j(src_mask_dir, fname)))
+        mask = np.array(Image.open(os.path.join(mask_dir, fname)))
         points = _generate_points(mask, label_percent=args.label_percent)
 
-        with open(j(dst_label_dir, f'{basename}.csv'), 'w') as fp:
+        with open(os.path.join(label_dir, f'{basename}.csv'), 'w') as fp:
             writer = csv.writer(fp)
             writer.writerows(points)
-
-    print('Copy validation data ...')
-    copytree(j(args.dataset_path, 'val'), j(args.output, 'val'))
