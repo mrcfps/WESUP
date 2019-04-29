@@ -7,16 +7,15 @@ from tqdm import tqdm
 from skimage.io import imread, imsave
 
 COLORS = (
-    (0, 255, 0),
-    (255, 0, 0),
     (0, 0, 255),
+    (255, 0, 0),
+    (0, 255, 0),
 )
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dot annotation dataset')
-    parser.add_argument('-r', '--radius', type=int, default=10, help='Circle radius')
+    parser.add_argument('-r', '--radius', type=int, default=5, help='Circle radius')
     parser.add_argument('-o', '--output',
                         help='Output path to store visualization results')
     args = parser.parse_args()
@@ -39,7 +38,7 @@ if __name__ == '__main__':
         for point in csvreader:
             point = [int(d) for d in point]
             center = (point[0])
-            viz_img = cv2.circle(img, (point[0], point[1]), args.radius, COLORS[point[2]], -1)
+            cv2.circle(img, (point[1], point[0]), args.radius, COLORS[point[2]], -1)
 
-        imsave(os.path.join(output_dir, img_name), viz_img)
+        imsave(os.path.join(output_dir, img_name), img)
         csvfile.close()
