@@ -12,11 +12,18 @@ from skimage.measure import label
 # shorthand for joining paths
 j = os.path.join
 
-BG_SAMPLE_RATIO = 1e-4
+BG_SAMPLE_RATIO = 5e-5
 
 
-def _sample_within_region(region_mask):
+def _sample_within_region(region_mask, random_sample=False):
     xs, ys = np.where(region_mask)
+    x_center, y_center = int(xs.mean().round()), int(ys.mean().round())
+
+    # if the center point is inside the region, return it
+    if region_mask[x_center, y_center] and not random_sample:
+        return x_center, y_center
+
+    # else return a random point
     return random.choice(np.c_[xs, ys])
 
 
@@ -31,7 +38,7 @@ def _generate_points(mask, label_percent=0.5):
             # if background, randomly sample some points
             sample_num = int(class_mask.sum() * BG_SAMPLE_RATIO)
             for _ in range(sample_num):
-                point = _sample_within_region(class_mask)
+                point = _sample_within_region(class_mask, random_sample=True)
                 points.append([*point, class_label])
         else:
             class_mask = label(class_mask)
