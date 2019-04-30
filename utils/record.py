@@ -9,7 +9,7 @@ import json
 import glob
 import os
 from datetime import datetime
-from shutil import copyfile, copytree
+from shutil import copyfile, copytree, rmtree
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -64,8 +64,9 @@ def copy_source_files(record_dir):
     """Copy all source scripts to record directory for reproduction."""
 
     source_dir = os.path.join(record_dir, 'source')
-    if not os.path.exists(source_dir):
-        os.mkdir(source_dir)
+    if os.path.exists(source_dir):
+        rmtree(source_dir)
+    os.mkdir(source_dir)
 
     for source_file in glob.glob('*.py'):
         copyfile(source_file, os.path.join(source_dir, source_file))
