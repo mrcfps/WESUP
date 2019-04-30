@@ -81,14 +81,6 @@ class PatchDataset(Dataset):
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
-        # path to cache directory
-        self.cache_dir = os.path.join(root_dir, 'cache')
-
-        # remove (possibly) existent cache
-        if os.path.exists(self.cache_dir):
-            rmtree(self.cache_dir)
-        os.mkdir(self.cache_dir)
-
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
@@ -113,10 +105,8 @@ class PatchDataset(Dataset):
                 label[:, 0] -= up
                 label[:, 1] -= left
 
-        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
-
         # prefer dot annotation to mask if `label` is present
-        sp_maps, sp_labels = segment_superpixels(img, label if label is not None else mask, cache=cache)
+        sp_maps, sp_labels = segment_superpixels(img, label if label is not None else mask)
 
         # convert to tensors
         img = TF.to_tensor(img)
@@ -157,13 +147,6 @@ class WholeImageDataset(Dataset):
         # sequence for identifying image index from patch index
         self.patches_numseq = np.cumsum(self.patches_nums)
 
-        self.cache_dir = os.path.join(root_dir, 'cache')
-
-        # remove (possibly) existent cache
-        if os.path.exists(self.cache_dir):
-            rmtree(self.cache_dir)
-        os.mkdir(self.cache_dir)
-
     def __len__(self):
         return sum(self.patches_nums)
 
@@ -181,8 +164,7 @@ class WholeImageDataset(Dataset):
         left = (patch_idx % n_w) * config.INFER_STRIDE
 
         patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
-        cache = os.path.join(self.cache_dir, f'{patch_idx}.npz')
-        sp_maps = segment_superpixels(patch, cache=cache)
+        sp_maps = segment_superpixels(patch)
 
         return TF.to_tensor(patch), torch.Tensor(sp_maps)
 

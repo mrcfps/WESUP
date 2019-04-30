@@ -12,7 +12,7 @@ from skimage.segmentation import slic
 import config
 
 
-def segment_superpixels(img, label=None, cache=None):
+def segment_superpixels(img, label=None):
     """Segment superpixels of a given image and return segment maps and their labels.
 
     This function is applicable to three scenarios:
@@ -24,17 +24,6 @@ def segment_superpixels(img, label=None, cache=None):
         (with n_l labeled superpixels coming first) and n_l labels will be returned.
     3. Inference: `label` is not provided. Only superpixel maps will be returned.
     """
-
-    if cache is not None and os.path.exists(cache):
-        try:
-            data = np.load(cache)
-            sp_maps = data['sp_maps']
-            sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
-            if 'sp_labels' in data:
-                return sp_maps, data['sp_labels']
-            return sp_maps
-        except BadZipFile:  # maybe the cache is corrupted
-            pass
 
     img = np.array(img)
     segments = slic(img, n_segments=int(img.shape[0] * img.shape[1] / config.SP_AREA),
@@ -79,13 +68,6 @@ def segment_superpixels(img, label=None, cache=None):
     # stacking normalized superpixel segment maps
     sp_maps = np.concatenate(
         [np.expand_dims(segments == idx, 0) for idx in sp_idx_list])
-
-    if cache is not None:
-        data = {'sp_maps': sp_maps}
-        if label is not None:
-            data['sp_labels'] = sp_labels.astype('uint8')
-        np.savez(cache, **data)
-
     sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
 
     if label is None:
