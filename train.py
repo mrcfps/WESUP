@@ -247,5 +247,5 @@ if __name__ == '__main__':
             viz_dir = os.path.join(record_dir, 'viz')
             test_whole_images(
                 wessup, os.path.join(args.dataset_path, 'val-whole'),
-                viz_dir=viz_dir, epoch=epoch, device=device, num_workers=args.jobs
+                viz_dir=viz_dir, epoch=epoch, evaluate=False, num_workers=args.jobs
             )

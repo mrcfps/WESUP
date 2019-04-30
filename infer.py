@@ -50,7 +50,7 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
 
 
 def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
-                      device='cpu', num_workers=4):
+                      evaluate=True, num_workers=4):
     """Making inference on a directory of images.
 
     Arguments:
@@ -59,19 +59,17 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
             with all images to be predicted
         viz_dir: path to store visualization and metrics results
         epoch: current training epoch
-        device: which device to run
+        evaluate: whether to compute metrics
         num_workers: number of workers to load data
     """
 
     model.eval()
+    device = next(model.parameters()).device
     dataset = WholeImageDataset(data_dir)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
 
     if viz_dir is not None and not os.path.exists(viz_dir):
         os.mkdir(viz_dir)
-
-    # whether to evaluate whole image predictions
-    evaluate = dataset.masks is not None
 
     if evaluate:
         # record metrics of each image
@@ -117,7 +115,7 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
                 img.save(os.path.join(viz_dir, img_name))
                 Image.fromarray(whole_pred * 255).save(os.path.join(viz_dir, pred_name))
 
-                if evaluate:
+                if dataset.masks is not None:
                     mask_name = img_name.replace(extname, f'.gt{extname}')
                     Image.fromarray(dataset.masks[img_idx] * 255).save(os.path.join(viz_dir, mask_name))
 
