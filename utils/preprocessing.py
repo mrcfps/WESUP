@@ -3,6 +3,7 @@ Preprocessing utilities.
 """
 
 import os
+from zipfile import BadZipFile
 
 import numpy as np
 from PIL import Image
@@ -25,12 +26,15 @@ def segment_superpixels(img, label=None, cache=None):
     """
 
     if cache is not None and os.path.exists(cache):
-        data = np.load(cache)
-        sp_maps = data['sp_maps']
-        sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
-        if 'sp_labels' in data:
-            return sp_maps, data['sp_labels']
-        return sp_maps
+        try:
+            data = np.load(cache)
+            sp_maps = data['sp_maps']
+            sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
+            if 'sp_labels' in data:
+                return sp_maps, data['sp_labels']
+            return sp_maps
+        except BadZipFile:  # maybe the cache is corrupted
+            pass
 
     img = np.array(img)
     segments = slic(img, n_segments=int(img.shape[0] * img.shape[1] / config.SP_AREA),
