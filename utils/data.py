@@ -108,10 +108,10 @@ class PatchDataset(Dataset):
         if self.train:
             (img, mask), (up, left) = _transform_and_crop(img, mask)
 
-        if label is not None:
-            # subtract offsets from top and left
-            label[:, 0] -= up
-            label[:, 1] -= left
+            if label is not None:
+                # subtract offsets from top and left
+                label[:, 0] -= up
+                label[:, 1] -= left
 
         cache = os.path.join(self.cache_dir, f'{patch_idx}.npz') if not self.train else None
 
