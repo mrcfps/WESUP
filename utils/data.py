@@ -81,6 +81,8 @@ class PatchDataset(Dataset):
         img_area = img.height * img.width
         self.patches_per_img = int(np.round(img_area / patch_area))
 
+        self.summary()
+
     def __len__(self):
         return len(self.img_paths) * self.patches_per_img
 
@@ -119,6 +121,12 @@ class PatchDataset(Dataset):
 
         return img, sp_maps, sp_labels
 
+    def summary(self):
+        print(f'\n{"Training" if self.train else "Validation"} set initialized with {len(self.img_paths)} images ({len(self)} patches).')
+
+        if self.mask_paths or self.label_paths:
+            print(f'Supervision mode: {"point" if self.label_paths is not None else "mask"}')
+
 
 class WholeImageDataset(Dataset):
     """Dataset with whole images for inference."""
@@ -147,6 +155,8 @@ class WholeImageDataset(Dataset):
         # sequence for identifying image index from patch index
         self.patches_numseq = np.cumsum(self.patches_nums)
 
+        self.summary()
+
     def __len__(self):
         return sum(self.patches_nums)
 
@@ -167,6 +177,9 @@ class WholeImageDataset(Dataset):
         sp_maps = segment_superpixels(patch)
 
         return TF.to_tensor(patch), torch.Tensor(sp_maps)
+
+    def summary(self):
+        print(f'\nWhole image dataset initialized with {len(self.img_paths)} images ({len(self)} patches).')
 
     def patch2img(self, patch_idx):
         """Identify which image this patch belongs to."""

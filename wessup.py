@@ -16,10 +16,6 @@ class BaseExtractor(ABC):
     def __init__(self, backbone):
         self.backbone = backbone
         self.conv_layers = self.get_conv_layers()
-
-        print(f'Wessup extractor with {len(self.conv_layers)} conv layers.')
-        print(f'Resulting in superpixel features of length {self.sp_feature_length}.')
-
         self.feature_maps = None
         self.fm_size = (config.PATCH_SIZE, config.PATCH_SIZE)
         self.hooks = []
@@ -159,8 +155,18 @@ class Wessup(nn.Module):
         self.lp_input_features = None
         self.classifier[-2].register_forward_hook(self._hook_fn)
 
+        self.summary()
+
     def _hook_fn(self, module, input, output):
         self.lp_input_features = input[0]
+
+    def _build_fc_layer(self, in_features, out_features):
+        return nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.ReLU(),
+            nn.BatchNorm1d(out_features),
+            nn.Dropout()
+        )
 
     def forward(self, x, sp_maps):
         # extract conv feature maps and flatten
@@ -176,10 +182,7 @@ class Wessup(nn.Module):
 
         return x
 
-    def _build_fc_layer(self, in_features, out_features):
-        return nn.Sequential(
-            nn.Linear(in_features, out_features),
-            nn.ReLU(),
-            nn.BatchNorm1d(out_features),
-            nn.Dropout()
-        )
+    def summary(self):
+        print(f'Wessup initialized with {self.backbone_name} backbone ({len(self.extractor.conv_layers)} conv layers).')
+        print(f'Superpixel feature length: {self.extractor.sp_feature_length}')
+        print()
