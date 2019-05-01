@@ -183,6 +183,5 @@ class Wessup(nn.Module):
         return x
 
     def summary(self):
-        print(f'Wessup initialized with {self.backbone_name} backbone ({len(self.extractor.conv_layers)} conv layers).')
+        print(f'\nWessup initialized with {self.backbone_name} backbone ({len(self.extractor.conv_layers)} conv layers).')
         print(f'Superpixel feature length: {self.extractor.sp_feature_length}')
-        print()
