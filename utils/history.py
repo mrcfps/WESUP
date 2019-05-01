@@ -6,8 +6,13 @@ from collections import defaultdict
 class HistoryTracker:
     def __init__(self, save_path=None):
         self.history = defaultdict(list)
+        self.learning_rate = None
         self.save_path = save_path
         self.is_train = True
+
+    def start_new_epoch(self, lr):
+        self.history.clear()
+        self.learning_rate = lr
 
     def train(self):
         self.is_train = True
@@ -25,7 +30,6 @@ class HistoryTracker:
         return ', '.join(reports)
 
     def log(self):
-        # metrics = [sum(r) / len(r) for r in self.history.values()]
         metrics = {
             k: sum(v) / len(v)
             for k, v in self.history.items()
@@ -42,14 +46,9 @@ class HistoryTracker:
             # create a new csv file
             with open(self.save_path, 'w') as fp:
                 writer = csv.writer(fp)
-                writer.writerow(self.history.keys())
-                writer.writerow(metrics)
+                writer.writerow(list(self.history.keys()) + ['lr'])
+                writer.writerow(metrics + [self.learning_rate])
         else:
             with open(self.save_path, 'a') as fp:
                 writer = csv.writer(fp)
-                writer.writerow(metrics)
-
-    def clear(self):
-        """Clear stored history."""
-
-        self.history.clear()
+                writer.writerow(metrics + [self.learning_rate])

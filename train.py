@@ -7,6 +7,7 @@ import os
 import warnings
 from functools import partial
 
+import numpy as np
 from tqdm import tqdm
 
 import torch
@@ -41,8 +42,10 @@ tracker = None
 def build_cli_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('--no-gpu', action='store_true', default=False,
-                        help='Whether to avoid using gpu')
+    parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
+                        help='Which device to use')
+    parser.add_argument('--no-lr-decay', action='store_true', default=False,
+                        help='Whether to disable automatic learning rate decay')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-w', '--warmup', type=int, default=0,
@@ -129,7 +132,7 @@ def train_one_iteration(model, optimizer, phase, *data):
     tracker.step(metrics)
 
 
-def train_one_epoch(model, optimizer, epoch, warmup=False):
+def train_one_epoch(model, optimizer):
     for phase in ['train', 'val']:
         print(f'{phase.capitalize()} phase:')
 
@@ -147,33 +150,12 @@ def train_one_epoch(model, optimizer, epoch, warmup=False):
         pbar.write(tracker.log())
         pbar.close()
 
-    if not warmup:
-        # save metrics to csv file
-        tracker.save()
-
-        # save learning curves
-        record.plot_learning_curves(tracker.save_path)
-
-        if epoch % config.CHECKPOINT_PERIOD == 0:
-            # save checkpoints for resuming training
-            ckpt_path = os.path.join(
-                record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
-            torch.save({
-                'epoch': epoch,
-                'backbone': wessup.backbone_name,
-                'model_state_dict': wessup.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }, ckpt_path)
-            print(f'Save checkpoint to {ckpt_path}.')
-
-    tracker.clear()
-
 
 if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
 
-    device = 'cpu' if args.no_gpu and not torch.cuda.is_available() else 'cuda'
+    device = args.device
     dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
 
     if args.resume_ckpt is not None:
@@ -237,10 +219,38 @@ if __name__ == '__main__':
     print('=' * 20)
     total_epochs = args.epochs + initial_epoch - 1
 
+    if not args.no_lr_decay:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                         factor=0.5, min_lr=1e-5,
+                                                         verbose=True)
+
     for epoch in range(initial_epoch, total_epochs + 1):
         print('\nEpoch {}/{}'.format(epoch, total_epochs))
         print('-' * 10)
-        train_one_epoch(wessup, optimizer, epoch)
+
+        tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
+        train_one_epoch(wessup, optimizer)
+
+        if not args.no_lr_decay:
+            scheduler.step(np.mean(tracker.history['val_dice']))
+
+        # save metrics to csv file
+        tracker.save()
+
+        # save learning curves
+        record.plot_learning_curves(tracker.save_path)
+
+        if epoch % config.CHECKPOINT_PERIOD == 0:
+            # save checkpoints for resuming training
+            ckpt_path = os.path.join(
+                record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
+            torch.save({
+                'epoch': epoch,
+                'backbone': wessup.backbone_name,
+                'model_state_dict': wessup.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, ckpt_path)
+            print(f'Save checkpoint to {ckpt_path}.')
 
         # test on whole images
         if epoch % config.WHOLE_IMAGE_TEST_PERIOD == 0:
