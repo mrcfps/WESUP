@@ -15,7 +15,7 @@ CLASS_WEIGHTS = (1, 2)
 PROPAGATE_WEIGHT = 0.5
 
 # Superpixel parameters.
-SP_AREA = 100
+SP_AREA = 150
 SP_COMPACTNESS = 30
 
 # Period (epochs) for saving checkpoints
