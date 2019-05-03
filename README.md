@@ -9,13 +9,13 @@ WEakly Supervised SUPerpixels for medical image segmentation using dot annotatio
 [GlaS challenge](https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/) is a well-known H&E stained digital pathology dataset for medical image segmentation. Download the dataset from [here](https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/download/warwick_qu_dataset_released_2016_07_08.zip). Then run the following convenience script to organize the dataset:
 
 ```bash
-$ python prepare_glas.py /path/to/downloaded/dataset -o full_anno_glas
+$ python prepare_glas.py /path/to/downloaded/dataset -o data_glas
 ```
 
-The mask-level fully-annotated dataset `full_anno_glas` looks like this:
+The mask-level fully-annotated dataset `data_glas` looks like this:
 
 ```
-full_anno_glas
+data_glas
 ├── train
 │   ├── images
 │   │   ├── train-1.png
@@ -45,40 +45,28 @@ Note that:
 - `val` directory contains cropped patches to be validated
 - `val-whole` directory contains whole images and masks to be validated
 
-To generate weakly-supervised dataset with dot annotation, run the following command:
+#### Generating point labels
 
 ```bash
-$ python scripts/generate_dot_annotation.py full_anno_glas -o dot_anno_glas -p 0.5
+$ python scripts/generate_dot_annotation.py data_glas -p 1e-4
 ```
 
-> The `-p` or `--label-percent` argument is for controlling the percentage of labeled objects. Larger value means stronger supervision.
+> The `-p` or `--label-percent` argument is for controlling the percentage of labeled pixels. Larger value means stronger supervision.
 
-The generated dataset `full_anno_glas` looks like this:
-
-```
-dot_anno_glas
-├── train
-│   ├── images
-│   │   ├── train-1.png
-│   │   └── train-2.png
-│   └── labels
-│       ├── train-1.csv
-│       └── train-2.csv
-└── val
-    ├── images
-    │   ├── val-1.png
-    │   └── val-2.png
-    └── labels
-        ├── val-1.csv
-        └── val-2.csv
-```
-
-Dot annotation are stored in a csv file, with each row (a triple) representing a point:
+Then `labels` directory storing point labels will be generated alongside `images` and `masks`. Each csv file within `labels` directory correspond to a training image, with each row (a triple) representing a point:
 
 ```csv
-p1_top,p1_left,p1_label
-p2_top,p2_left,p2_label
+p1_top,p1_left,p1_class
+p2_top,p2_left,p2_class
 ```
+
+#### Visualizing point labels
+
+```bash
+$ python scripts/visualize_dot_annotation.py data_glas/train
+```
+
+You will see visualization outputs in `data_glas/train/viz`.
 
 ## Training
 
