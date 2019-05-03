@@ -93,11 +93,11 @@ def cross_entropy(y_hat, y_true, weight=None):
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    if len(data) == 4:  # data from `FullAnnotationDataset`
+    if len(data) == 4:
         img, mask, sp_maps, sp_labels = data
-    else:  # data from `DotAnnotationDataset`
+    else:
         img, sp_maps, sp_labels = data
-        mask = None
+        mask = None  # mask-level annotation is not provided
 
     img = img.to(device)
     sp_maps = sp_maps.to(device).squeeze()
