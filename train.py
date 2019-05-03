@@ -80,16 +80,16 @@ def cross_entropy(y_hat, y_true, weight=None):
     y_hat = torch.clamp(y_hat, min=config.EPSILON, max=(1 - config.EPSILON))
 
     # number of samples with labels
-    n_labels = torch.sum(y_true.sum(dim=1) > 0).float()
+    labeled_samples = torch.sum(y_true.sum(dim=1) > 0).float()
 
-    if n_labels.item() == 0:
-        return 0
+    if labeled_samples.item() == 0:
+        return torch.tensor(0.)
 
     ce = -y_true * torch.log(y_hat)
     if weight is not None:
         ce = ce * weight.unsqueeze(0)
 
-    return torch.sum(ce) / n_labels
+    return torch.sum(ce) / labeled_samples
 
 
 def train_one_iteration(model, optimizer, phase, *data):
@@ -111,13 +111,26 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
-        if sp_pred.size(0) > sp_labels.size(0):
+
+        # total number of superpixels
+        total_num = sp_pred.size(0)
+
+        # number of labeled superpixels
+        labeled_num = sp_labels.size(0)
+
+        metrics['labeled_sp_ratio'] = labeled_num / total_num
+
+        if labeled_num < total_num:
             # weakly-supervised mode
             propagated_labels = label_propagate(model.lp_input_features, sp_labels)
-            n_l = sp_labels.size(0)
-            loss = ce(sp_pred[:n_l], sp_labels) + config.PROPAGATE_WEIGHT * ce(sp_pred[n_l:], propagated_labels)
+            metrics['propagated_labels'] = propagated_labels.sum().item()
+            loss = ce(sp_pred[:labeled_num], sp_labels)
+            propagate_loss = config.PROPAGATE_WEIGHT * ce(sp_pred[labeled_num:], propagated_labels)
+            metrics['propagate_loss'] = propagate_loss.item()
+            loss += propagate_loss
         else:  # fully-supervised mode
             loss = ce(sp_pred, sp_labels)
+
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()

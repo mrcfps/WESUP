@@ -4,12 +4,13 @@ Data loading utilities.
 
 import csv
 import os
-import random
 import glob
+from functools import partial
 from shutil import rmtree
 
 import numpy as np
 from PIL import Image
+from skimage.io import imread
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -27,31 +28,32 @@ def _list_images(path):
     images = []
     for ext in ('jpg', 'jpeg', 'png', 'bmp'):
         images.extend(glob.glob(os.path.join(path, f'*.{ext}')))
-    return images
+    return sorted(images)
 
 
-def _transform_and_crop(img, mask=None):
+def _transform_and_crop(*arrs):
     """
-    Simultaneously apply random transformations to images (and optionally masks).
+    Simultaneously apply random transformations to multiple images.
     """
 
-    if random.random() > 0.5:
-        img = TF.hflip(img)
-        mask = TF.hflip(mask) if mask else None
+    def crop(arr, rand1, rand2):
+        patch_size = config.PATCH_SIZE
+        up = int(rand1 * (arr.shape[0] - patch_size))
+        left = int(rand2 * (arr.shape[1] - patch_size))
+        return arr[up:up + patch_size, left:left + patch_size]
 
-    if random.random() > 0.5:
-        img = TF.vflip(img)
-        mask = TF.vflip(mask) if mask else None
+    crop_partial = partial(crop, rand1=np.random.random(), rand2=np.random.random())
 
-    # possibly some rotations ...
+    transforms = [(0.5, np.fliplr), (0.5, np.flipud), (1, crop_partial)]
 
-    patch_size = config.PATCH_SIZE
-    up = random.randint(0, img.height - patch_size)
-    left = random.randint(0, img.width - patch_size)
-    img = TF.crop(img, up, left, patch_size, patch_size)
-    mask = TF.crop(mask, up, left, patch_size, patch_size) if mask else None
+    for prob, transform in transforms:
+        if np.random.random() < prob:
+            arrs = [transform(arr) if arr is not None else None for arr in arrs]
 
-    return (img, mask), (up, left)
+    if len(arrs) == 0:
+        return arrs[0]
+
+    return arrs
 
 
 class PatchDataset(Dataset):
@@ -71,14 +73,14 @@ class PatchDataset(Dataset):
             self.mask_paths = _list_images(os.path.join(root_dir, 'masks'))
 
         if os.path.exists(os.path.join(root_dir, 'labels')):
-            self.label_paths = glob.glob(os.path.join(root_dir, 'labels', '*.csv'))
+            self.label_paths = sorted(glob.glob(os.path.join(root_dir, 'labels', '*.csv')))
 
         self.train = train
 
         # compute how many patches are sampled for each image
         patch_area = config.PATCH_SIZE ** 2
-        img = Image.open(self.img_paths[0])
-        img_area = img.height * img.width
+        img = imread(self.img_paths[0])
+        img_area = img.shape[0] * img.shape[1]
         self.patches_per_img = int(np.round(img_area / patch_area))
 
         self.summary()
@@ -88,41 +90,45 @@ class PatchDataset(Dataset):
 
     def __getitem__(self, patch_idx):
         img_idx = patch_idx // self.patches_per_img
-        img = Image.open(self.img_paths[img_idx])
-        mask, label = None, None
+        img = imread(self.img_paths[img_idx])
+        mask, point_mask = None, None
 
         if self.mask_paths is not None:
-            mask = Image.open(self.mask_paths[img_idx])
+            mask = imread(self.mask_paths[img_idx])
+            mask = np.concatenate([np.expand_dims(mask == i, -1)
+                                  for i in range(config.N_CLASSES)], axis=-1)
 
         if self.label_paths is not None:
             with open(self.label_paths[img_idx]) as fp:
                 reader = csv.reader(fp)
-                label = np.array([[int(d) for d in point] for point in reader])
+                points = np.array([[int(d) for d in point] for point in reader])
+
+            # compute point mask
+            point_mask = np.zeros((img.shape[0], img.shape[1], config.N_CLASSES))
+            for i, j, class_ in points:
+                c = np.zeros(config.N_CLASSES)
+                c[class_] = 1
+                point_mask[i, j] = c
 
         if self.train:
-            (img, mask), (up, left) = _transform_and_crop(img, mask)
-
-            if label is not None:
-                # subtract offsets from top and left
-                label[:, 0] -= up
-                label[:, 1] -= left
+            img, mask, point_mask = _transform_and_crop(img, mask, point_mask)
 
         # prefer dot annotation to mask if `label` is present
-        sp_maps, sp_labels = segment_superpixels(img, label if label is not None else mask)
+        sp_maps, sp_labels = segment_superpixels(img, point_mask if point_mask is not None else mask)
 
         # convert to tensors
-        img = TF.to_tensor(img)
-        sp_maps = torch.Tensor(sp_maps)
-        sp_labels = torch.Tensor(sp_labels)
+        img = TF.to_tensor(Image.fromarray(img))
+        sp_maps = torch.from_numpy(sp_maps)
+        sp_labels = torch.from_numpy(sp_labels)
 
         if mask is not None:
-            mask = torch.LongTensor(np.array(mask))
+            mask = torch.LongTensor(mask.argmax(axis=-1))
             return img, mask, sp_maps, sp_labels
 
         return img, sp_maps, sp_labels
 
     def summary(self):
-        print(f'\n{"Training" if self.train else "Validation"} set initialized with {len(self.img_paths)} images ({len(self)} patches).')
+        print(f'{"Training" if self.train else "Validation"} set initialized with {len(self.img_paths)} images ({len(self)} patches).')
 
         if self.mask_paths or self.label_paths:
             print(f'Supervision mode: {"point" if self.label_paths is not None else "mask"}')
@@ -136,7 +142,7 @@ class WholeImageDataset(Dataset):
 
         if os.path.exists(os.path.join(root_dir, 'masks')):
             self.masks = [
-                np.array(Image.open(mask_path))
+                np.array(imread(mask_path))
                 for mask_path in _list_images(os.path.join(root_dir, 'masks'))
             ]
         else:
@@ -144,7 +150,7 @@ class WholeImageDataset(Dataset):
 
         # patches grid shape for each image
         self.patches_grids = [
-            compute_patches_grid_shape(np.array(Image.open(img_path)),
+            compute_patches_grid_shape(np.array(imread(img_path)),
                                        config.PATCH_SIZE, config.INFER_STRIDE)
             for img_path in self.img_paths
         ]
@@ -162,7 +168,7 @@ class WholeImageDataset(Dataset):
 
     def __getitem__(self, patch_idx):
         img_idx = self.patch2img(patch_idx)
-        img = np.array(Image.open(self.img_paths[img_idx]))
+        img = np.array(imread(self.img_paths[img_idx]))
         img = pad_image(img, config.PATCH_SIZE, config.INFER_STRIDE)
 
         if img_idx > 0:
@@ -176,10 +182,10 @@ class WholeImageDataset(Dataset):
         patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
         sp_maps = segment_superpixels(patch)
 
-        return TF.to_tensor(patch), torch.Tensor(sp_maps)
+        return TF.to_tensor(patch), torch.from_numpy(sp_maps)
 
     def summary(self):
-        print(f'\nWhole image dataset initialized with {len(self.img_paths)} images ({len(self)} patches).')
+        print(f'Whole image dataset initialized with {len(self.img_paths)} images ({len(self)} patches).')
 
     def patch2img(self, patch_idx):
         """Identify which image this patch belongs to."""

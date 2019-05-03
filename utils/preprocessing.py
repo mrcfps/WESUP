@@ -12,65 +12,56 @@ from skimage.segmentation import slic
 import config
 
 
-def segment_superpixels(img, label=None):
+def _compute_superpixel_label(mask, segments, sp_idx):
+    sp_mask = mask * np.expand_dims(segments == sp_idx, -1)
+    if sp_mask.sum() == 0:
+        return np.array([0, 0])
+    return sp_mask.sum(axis=(0, 1)) / sp_mask.sum()
+
+
+def segment_superpixels(img, mask=None):
     """Segment superpixels of a given image and return segment maps and their labels.
 
-    This function is applicable to three scenarios:
+    Arguments:
+        img: image with shape (H, W, n_channels)
+        mask (optional): annotation mask with shape (H, W, C). Each pixel is a one-hot encoded
+            label vector. If this vector is all zeros, then its class is unknown.
 
-    1. Full annotation: `label` is a mask (`PIL.Image.Image`) with the same height and width as `img`.
-        Superpixel maps and their labels will be returned.
-    2. Dot annotation: `label` is n_l x 3 array (n_l is the number of points, and each point
-        contains information about its x and y coordinates and label). Superpixel maps
-        (with n_l labeled superpixels coming first) and n_l labels will be returned.
-    3. Inference: `label` is not provided. Only superpixel maps will be returned.
+    Returns
+        sp_maps: superpixel maps with shape (n_superpixles, H, W)
+        sp_labels: superpixel labels with shape (n_labels, C), only when `mask` is given.
+            `n_labels` could be smaller than `n_superpixels` in the case of point supervision,
+            where `sp_labels` correspond to labels of the first `n_labels` superpixels.
     """
 
-    img = np.array(img)
     segments = slic(img, n_segments=int(img.shape[0] * img.shape[1] / config.SP_AREA),
                     compactness=config.SP_COMPACTNESS)
 
-    sp_num = segments.max() + 1
-    sp_idx_list = range(sp_num)
+    # ordering of superpixels
+    sp_idx_list = range(segments.max() + 1)
 
-    if isinstance(label, Image.Image):  # full annotation
-        label = np.array(label)
-        label = np.concatenate([np.expand_dims(label == i, -1)
-                                for i in range(config.N_CLASSES)], axis=-1)
+    if mask is not None:
         sp_labels = np.array([
-            (label * np.expand_dims(segments == i, -1)
-             ).sum(axis=(0, 1)) / np.sum(segments == i)
-            for i in range(sp_num)
+            _compute_superpixel_label(mask, segments, sp_idx)
+            for sp_idx in range(segments.max() + 1)
         ])
+
+        # move labeled superpixels to the front of `sp_idx_list`
+        labeled_sps = np.where(sp_labels.sum(axis=-1) > 0)[0]
+        unlabeled_sps = np.where(sp_labels.sum(axis=-1) == 0)[0]
+        sp_idx_list = np.r_[labeled_sps, unlabeled_sps]
+
+        # quantize superpixel labels (e.g. from (0.7, 0.3) to (1.0, 0.0))
+        sp_labels = sp_labels[labeled_sps]
         sp_labels = sp_labels == sp_labels.max(axis=-1, keepdims=True)
-    elif label is not None:  # dot annotation
-        labeled_sps, sp_labels = [], []
-
-        for point in label:
-            i, j, class_ = point
-            try:
-                if segments[i, j] not in labeled_sps:
-                    labeled_sps.append(segments[i, j])
-                    sp_labels.append(class_)
-            except IndexError:
-                # point is outside this patch, ignore it
-                pass
-
-        # one-hot encoding
-        sp_labels = np.array(sp_labels)
-        sp_labels = np.concatenate([
-            np.expand_dims(sp_labels == i, 0)
-            for i in range(config.N_CLASSES)
-        ]).T
-
-        unlabeled_sps = list(set(np.unique(segments)) - set(labeled_sps))
-        sp_idx_list = labeled_sps + unlabeled_sps
 
     # stacking normalized superpixel segment maps
     sp_maps = np.concatenate(
         [np.expand_dims(segments == idx, 0) for idx in sp_idx_list])
     sp_maps = sp_maps / sp_maps.sum(axis=(1, 2), keepdims=True)
+    sp_maps = sp_maps.astype('float32')
 
-    if label is None:
+    if mask is None:
         return sp_maps
 
-    return sp_maps, sp_labels.astype('uint8')
+    return sp_maps, sp_labels.astype('float32')
