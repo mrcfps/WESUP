@@ -11,6 +11,9 @@ N_CLASSES = 2
 # Class weights for cross-entropy loss function (background, class-1, class-2)
 CLASS_WEIGHTS = (1, 2)
 
+# Threshold of similarity for label propagation
+PROPAGATE_THRESHOLD = 0.9
+
 # Weight for label-propagated samples when computing loss function
 PROPAGATE_WEIGHT = 0.5
 
@@ -25,6 +28,7 @@ CHECKPOINT_PERIOD = 5
 MOMENTUM = 0.9
 WEIGHT_DECAY = 0.0001
 
+# Stride for sliding-window inference
 INFER_STRIDE = 200
 
 # Period for testing on whole images

@@ -122,7 +122,8 @@ def train_one_iteration(model, optimizer, phase, *data):
 
         if labeled_num < total_num:
             # weakly-supervised mode
-            propagated_labels = label_propagate(model.lp_input_features, sp_labels)
+            propagated_labels = label_propagate(model.lp_input_features, sp_labels,
+                                                config.PROPAGATE_THRESHOLD)
             metrics['propagated_labels'] = propagated_labels.sum().item()
             loss = ce(sp_pred[:labeled_num], sp_labels)
             propagate_loss = config.PROPAGATE_WEIGHT * ce(sp_pred[labeled_num:], propagated_labels)
