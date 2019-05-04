@@ -176,7 +176,7 @@ if __name__ == '__main__':
         record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
         tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
 
-        checkpoint = torch.load(args.resume_ckpt)
+        checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
         # load previous model states
         backbone = checkpoint['backbone']
