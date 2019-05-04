@@ -7,6 +7,8 @@ import csv
 import os
 import warnings
 from collections import defaultdict
+from importlib import import_module
+from shutil import copyfile
 
 import torch
 from torch.utils.data import DataLoader
@@ -16,7 +18,6 @@ from tqdm import tqdm
 from PIL import Image
 
 import config
-from wessup import Wessup
 from utils.data import WholeImageDataset
 from utils.metrics import detection_f1
 from utils.metrics import object_dice
@@ -148,22 +149,32 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-c', '--checkpoint', required=True, help='Path to checkpoint')
+    parser.add_argument('--wessup-module', help='Path to wessup module (.py file)')
     parser.add_argument('--no-gpu', action='store_true', default=False,
                         help='Whether to avoid using gpu')
-    parser.add_argument('-o', '--output', default='viz',
+    parser.add_argument('-o', '--output',
                         help='Path to store visualization and metrics result')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preprocessing')
 
     args = parser.parse_args()
 
-    device = 'cpu' if args.no_gpu and not torch.cuda.is_available() else 'cuda'
+    device = 'cpu' if args.no_gpu or not torch.cuda.is_available() else 'cuda'
 
-    ckpt = torch.load(args.checkpoint)
-    wessup = Wessup(ckpt['backbone'])
-    wessup.to(device)
-    wessup.load_state_dict(ckpt['model_state_dict'])
-    print(f'Loaded model from {args.model}.')
+    wessup_module = args.wessup_module
+    if wessup_module is None:
+        wessup_module = os.path.join(args.checkpoint, '..', '..', 'source', 'wessup.py')
+        wessup_module = os.path.abspath(wessup_module)
+    copyfile(wessup_module, 'wessup_ckpt.py')
+    wessup = import_module('wessup_ckpt')
 
-    test_whole_images(wessup, args.dataset_path, args.output,
-                      device=device, num_workers=args.jobs)
+    ckpt = torch.load(args.checkpoint, map_location=device)
+    model = wessup.Wessup(ckpt['backbone'])
+    model.to(device)
+    model.load_state_dict(ckpt['model_state_dict'])
+    print(f'Loaded checkpoint from {args.checkpoint}.')
+
+    test_whole_images(model, args.dataset_path, args.output,
+                      epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
+
+    os.remove('wessup_ckpt.py')

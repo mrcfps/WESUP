@@ -131,3 +131,9 @@ $ python infer.py /path/to/test/data -c /path/to/checkpoint -o prediction -j 4
 ```
 
 Test images should be placed in a subdirectory named `images`.
+
+### Testing on GlaS dataset
+
+```bash
+$ python test.py data_glas -c /path/to/checkpoint
+```
