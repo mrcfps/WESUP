@@ -56,7 +56,7 @@ def build_cli_parser():
                         help='CNN backbone to use (such as vgg13, resnet50 and densenet121)')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
-    parser.add_argument('--lr', type=float, default=0.01,
+    parser.add_argument('--lr', type=float, default=0.001,
                         help='Learning rate for optimizer')
     parser.add_argument('-m', '--message', help='Note on this experiment')
 
@@ -207,7 +207,7 @@ if __name__ == '__main__':
             # only optimize classifier of wessup
             optimizer = optim.SGD(
                 wessup.classifier.parameters(),
-                lr=0.01,
+                lr=0.005,
                 momentum=config.MOMENTUM,
                 weight_decay=config.WEIGHT_DECAY
             )
