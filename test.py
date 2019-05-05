@@ -27,7 +27,7 @@ if __name__ == '__main__':
     wessup = import_module('wessup_ckpt')
 
     ckpt = torch.load(args.checkpoint, map_location=device)
-    model = wessup.Wessup(vgg13().features, device=device)
+    model = wessup.Wessup(ckpt['backbone'])
     model.to(device)
     model.load_state_dict(ckpt['model_state_dict'])
     print(f'Loaded checkpoint from {args.checkpoint}.')
