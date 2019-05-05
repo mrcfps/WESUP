@@ -143,22 +143,28 @@ class Wessup(nn.Module):
         else:
             raise ValueError(f'unsupported backbone {backbone_name}.')
 
-        self.classifier = nn.Sequential(
+        # fully-connected layers for dimensionality reduction
+        self.fc_layers = nn.Sequential(
             self._build_fc_layer(self.extractor.sp_feature_length, 1024),
             self._build_fc_layer(1024, 1024),
-            self._build_fc_layer(1024, 32),
+            nn.Linear(1024, 32),
+            nn.ReLU()
+        )
+
+        # final softmax classifier
+        self.classifier = nn.Sequential(
             nn.Linear(32, config.N_CLASSES),
             nn.Softmax()
         )
 
         # label propagation input features
-        self.lp_input_features = None
-        self.classifier[-2].register_forward_hook(self._hook_fn)
+        self.clf_input_features = None
+        self.fc_layers.register_forward_hook(self._hook_fn)
 
         self.summary()
 
     def _hook_fn(self, module, input, output):
-        self.lp_input_features = input[0]
+        self.clf_input_features = output
 
     def _build_fc_layer(self, in_features, out_features):
         return nn.Sequential(
@@ -177,11 +183,14 @@ class Wessup(nn.Module):
         sp_maps = sp_maps.view(sp_maps.size(0), -1)
         x = torch.mm(sp_maps, x.t())
 
-        # classify each superpixel with an MLP
+        # reduce superpixel feature dimensions with fully connected layers
+        x = self.fc_layers(x)
+
+        # classify each superpixel
         x = self.classifier(x)
 
         return x
 
     def summary(self):
-        print(f'\nWessup initialized with {self.backbone_name} backbone ({len(self.extractor.conv_layers)} conv layers).')
+        print(f'Wessup initialized with {self.backbone_name} backbone ({len(self.extractor.conv_layers)} conv layers).')
         print(f'Superpixel feature length: {self.extractor.sp_feature_length}')
