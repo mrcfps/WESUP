@@ -36,13 +36,6 @@ if __name__ == '__main__':
     if not os.path.exists(results_dir):
         os.mkdir(results_dir)
 
-    print('\nTesting on validation data ...')
-    data_dir = os.path.join(args.dataset_path, 'val-whole')
-    output_dir = os.path.join(results_dir, 'val')
-    test_whole_images(model, data_dir, output_dir,
-                      epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
-    print(f'Results on validation data have been saved to {output_dir}.')
-
     print('\nTesting on test set A ...')
     data_dir = os.path.join(args.dataset_path, 'testA')
     output_dir = os.path.join(results_dir, 'testA')
