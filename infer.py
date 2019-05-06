@@ -23,6 +23,7 @@ from utils.metrics import detection_f1
 from utils.metrics import object_dice
 from utils.metrics import object_hausdorff
 from utils.tile import combine_patches_to_image
+from utils.preprocessing import preprocess_superpixels
 
 warnings.filterwarnings('ignore')
 
@@ -82,9 +83,10 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
         # identify which image this patch belongs to
         img_idx = dataset.patch2img(patch_idx)
 
-        patch, sp_maps = data
+        patch, segments = data
         patch = patch.to(device)
-        sp_maps = sp_maps.to(device).squeeze()
+        segments = segments.to(device).squeeze()
+        sp_maps = preprocess_superpixels(segments)
 
         sp_pred = model(patch, sp_maps)
         pred_masks.append(

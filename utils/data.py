@@ -6,11 +6,10 @@ import csv
 import os
 import glob
 from functools import partial
-from shutil import rmtree
 
 import numpy as np
-from PIL import Image
 from skimage.io import imread
+from skimage.segmentation import slic
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -19,7 +18,6 @@ import torchvision.transforms.functional as TF
 import config
 from .tile import pad_image
 from .tile import compute_patches_grid_shape
-from .preprocessing import segment_superpixels
 
 
 def _list_images(path):
@@ -44,7 +42,8 @@ def _transform_and_crop(*arrs):
 
     crop_partial = partial(crop, rand1=np.random.random(), rand2=np.random.random())
 
-    transforms = [(0.5, np.fliplr), (0.5, np.flipud), (1, crop_partial)]
+    # transforms to apply (the final `copy` is to avert negative-strided arrays)
+    transforms = [(0.5, np.fliplr), (0.5, np.flipud), (1, crop_partial), (1, np.copy)]
 
     for prob, transform in transforms:
         if np.random.random() < prob:
@@ -57,7 +56,16 @@ def _transform_and_crop(*arrs):
 
 
 class PatchDataset(Dataset):
-    """Dataset with cropped patches used for training and validation."""
+    """Dataset with cropped patches used for training and validation.
+
+    Return values:
+        img: image patch tensor with size (3, H, W)
+        segments: superpixel segmentation map with size (H, W)
+        mask: pixel-level annotation with size (H, W, n_classes) if given, else
+            a zero tensor will be returned
+        point_mask: point-level annotation with size (H, W, n_classes) if given,
+            else a zero tensor will be returned
+    """
 
     def __init__(self, root_dir, train=True):
         # path to images
@@ -96,7 +104,8 @@ class PatchDataset(Dataset):
         if self.mask_paths is not None:
             mask = imread(self.mask_paths[img_idx])
             mask = np.concatenate([np.expand_dims(mask == i, -1)
-                                  for i in range(config.N_CLASSES)], axis=-1)
+                                   for i in range(config.N_CLASSES)], axis=-1)
+            mask = mask.astype('int64')
 
         if self.label_paths is not None:
             with open(self.label_paths[img_idx]) as fp:
@@ -113,19 +122,22 @@ class PatchDataset(Dataset):
         if self.train:
             img, mask, point_mask = _transform_and_crop(img, mask, point_mask)
 
-        # prefer dot annotation to mask if `label` is present
-        sp_maps, sp_labels = segment_superpixels(img, point_mask if point_mask is not None else mask)
+        segments = slic(img, n_segments=int(img.shape[0] * img.shape[1] / config.SP_AREA),
+                        compactness=config.SP_COMPACTNESS)
 
         # convert to tensors
-        img = TF.to_tensor(Image.fromarray(img))
-        sp_maps = torch.from_numpy(sp_maps)
-        sp_labels = torch.from_numpy(sp_labels)
+        img = TF.to_tensor(img)
+        segments = torch.LongTensor(segments)
 
         if mask is not None:
-            mask = torch.LongTensor(mask.argmax(axis=-1))
-            return img, mask, sp_maps, sp_labels
+            mask = torch.LongTensor(mask)
 
-        return img, sp_maps, sp_labels
+        if point_mask is not None:
+            point_mask = torch.LongTensor(point_mask)
+
+        data = (img, segments, mask, point_mask)
+
+        return tuple(datum if datum is not None else torch.tensor(0) for datum in data)
 
     def summary(self):
         print(f'{"Training" if self.train else "Validation"} set initialized with {len(self.img_paths)} images ({len(self)} patches).')
@@ -150,7 +162,7 @@ class WholeImageDataset(Dataset):
 
         # patches grid shape for each image
         self.patches_grids = [
-            compute_patches_grid_shape(np.array(imread(img_path)),
+            compute_patches_grid_shape(imread(img_path),
                                        config.PATCH_SIZE, config.INFER_STRIDE)
             for img_path in self.img_paths
         ]
@@ -180,9 +192,10 @@ class WholeImageDataset(Dataset):
         left = (patch_idx % n_w) * config.INFER_STRIDE
 
         patch = img[up:up + config.PATCH_SIZE, left:left + config.PATCH_SIZE]
-        sp_maps = segment_superpixels(patch)
+        segments = slic(patch, n_segments=int(patch.shape[0] * patch.shape[1] / config.SP_AREA),
+                        compactness=config.SP_COMPACTNESS)
 
-        return TF.to_tensor(patch), torch.from_numpy(sp_maps)
+        return TF.to_tensor(patch), torch.LongTensor(segments)
 
     def summary(self):
         print(f'Whole image dataset initialized with {len(self.img_paths)} images ({len(self)} patches).')

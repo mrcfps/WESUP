@@ -21,6 +21,7 @@ from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
 from utils.metrics import dice
 from utils.history import HistoryTracker
+from utils.preprocessing import preprocess_superpixels
 from infer import test_whole_images
 from infer import compute_mask_with_superpixel_prediction
 
@@ -93,15 +94,19 @@ def cross_entropy(y_hat, y_true, weight=None):
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    if len(data) == 4:
-        img, mask, sp_maps, sp_labels = data
-    else:
-        img, sp_maps, sp_labels = data
-        mask = None  # mask-level annotation is not provided
+
+    def is_empty(tensor):
+        return torch.equal(tensor, torch.tensor(0).to(device))
+
+    img, segments, mask, point_mask = data
 
     img = img.to(device)
-    sp_maps = sp_maps.to(device).squeeze()
-    sp_labels = sp_labels.to(device).squeeze()
+    segments = segments.to(device).squeeze()
+    mask = mask.to(device).squeeze()
+    point_mask = point_mask.to(device).squeeze()
+
+    sp_maps, sp_labels = preprocess_superpixels(segments,
+                                                point_mask if not is_empty(point_mask) else mask)
 
     optimizer.zero_grad()
     metrics = dict()
@@ -137,8 +142,8 @@ def train_one_iteration(model, optimizer, phase, *data):
             loss.backward()
             optimizer.step()
 
-    if mask is not None:
-        mask = mask.to(device).squeeze()
+    if not is_empty(mask):
+        mask = mask.argmax(dim=-1)
         pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
         metrics['pixel_acc'] = accuracy(pred_mask, mask)
         metrics['dice'] = dice(pred_mask, mask)
@@ -217,7 +222,7 @@ if __name__ == '__main__':
             for epoch in range(1, args.warmup + 1):
                 print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
                 print('-' * 10)
-                train_one_epoch(wessup, optimizer, epoch, warmup=True)
+                train_one_epoch(wessup, optimizer, epoch)
 
         optimizer = optim.SGD(
             wessup.parameters(),
