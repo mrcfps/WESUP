@@ -8,8 +8,8 @@ PATCH_SIZE = 384
 # Number of target classes.
 N_CLASSES = 2
 
-# Class weights for cross-entropy loss function (background, class-1, class-2)
-CLASS_WEIGHTS = (1, 2)
+# Class weights for cross-entropy loss function
+CLASS_WEIGHTS = (1, 1)
 
 # Threshold of similarity for label propagation
 PROPAGATE_THRESHOLD = 0.9
@@ -26,7 +26,7 @@ CHECKPOINT_PERIOD = 5
 
 # Optimization parameters
 MOMENTUM = 0.9
-WEIGHT_DECAY = 0.0001
+WEIGHT_DECAY = 0.0005
 
 # Stride for sliding-window inference
 INFER_STRIDE = 200
