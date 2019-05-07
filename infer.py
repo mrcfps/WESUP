@@ -12,17 +12,19 @@ from shutil import copyfile
 
 import torch
 from torch.utils.data import DataLoader
+import torchvision.transforms.functional as TF
 
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
 
 import config
-from utils.data import WholeImageDataset
+from utils.data import SegmentationDataset
+from utils.metrics import accuracy
 from utils.metrics import detection_f1
+from utils.metrics import dice
 from utils.metrics import object_dice
 from utils.metrics import object_hausdorff
-from utils.tile import combine_patches_to_image
 from utils.preprocessing import preprocess_superpixels
 
 warnings.filterwarnings('ignore')
@@ -35,6 +37,9 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
     Arguments:
         sp_pred: superpixel predictions with size (N, n_classes)
         sp_maps: superpixel maps with size (N, H, W)
+
+    Returns:
+        pred_mask: segmentation pprediction with size (H, W)
     """
 
     sp_pred = sp_pred.argmax(dim=-1)
@@ -51,8 +56,8 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
     return pred_mask
 
 
-def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
-                      evaluate=True, num_workers=4):
+def predict(model, data_dir, viz_dir=None, epoch=None,
+            evaluate=True, num_workers=4):
     """Making inference on a directory of images.
 
     Arguments:
@@ -67,7 +72,7 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
 
     model.eval()
     device = next(model.parameters()).device
-    dataset = WholeImageDataset(data_dir)
+    dataset = SegmentationDataset(data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
 
     if viz_dir is not None and not os.path.exists(viz_dir):
@@ -77,52 +82,43 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
         # record metrics of each image
         metrics = defaultdict(list)
 
-    print('\nTesting whole images ...')
-    pred_masks = []
-    for patch_idx, data in tqdm(enumerate(dataloader), total=len(dataset)):
-        # identify which image this patch belongs to
-        img_idx = dataset.patch2img(patch_idx)
+    for idx, data in tqdm(enumerate(dataloader)):
+        if len(data) == 3:
+            img, segments, mask = data
+            mask = mask.to(device).squeeze()
+        else:
+            img, segments = data
+            mask = None
 
-        patch, segments = data
-        patch = patch.to(device)
+        img = img.to(device)
         segments = segments.to(device).squeeze()
-        sp_maps = preprocess_superpixels(segments)
+        sp_maps = preprocess_superpixels(segments, mask)
 
-        sp_pred = model(patch, sp_maps)
-        pred_masks.append(
-            compute_mask_with_superpixel_prediction(sp_pred, sp_maps).cpu().numpy()
-        )
+        sp_pred = model(img, sp_maps)
+        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
 
-        if len(pred_masks) == dataset.patches_nums[img_idx]:
-            img = Image.open(dataset.img_paths[img_idx])
+        if evaluate and mask is not None:
+            metrics['accuracy'].append(accuracy(pred_mask, mask))
+            metrics['detection_f1'].append(detection_f1(pred_mask, mask))
+            metrics['dice'].append(dice(pred_mask, mask))
+            metrics['object_dice'].append(object_dice(pred_mask, mask))
+            metrics['object_hausdorff'].append(object_hausdorff(pred_mask, mask))
 
-            # all patches of an image have been predicted, so combine the predictions
-            pred_masks = np.expand_dims(np.array(pred_masks), -1)
-            whole_pred = combine_patches_to_image(pred_masks,
-                                                  dataset.patches_grids[img_idx],
-                                                  (img.height, img.width),
-                                                  config.INFER_STRIDE)
-            whole_pred = whole_pred.squeeze().round().astype('uint8')
+        if viz_dir is not None:
+            img_name = os.path.basename(dataset.img_paths[idx])
+            extname = os.path.splitext(img_name)[-1]
+            pred_name = img_name.replace(extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
 
-            if evaluate:
-                ground_truth = dataset.masks[img_idx]
-                metrics['detection_f1'].append(detection_f1(whole_pred, ground_truth))
-                metrics['object_dice'].append(object_dice(whole_pred, ground_truth))
-                metrics['object_hausdorff'].append(object_hausdorff(whole_pred, ground_truth))
+            # save original image
+            TF.to_pil_image(img).save(os.path.join(viz_dir, img_name))
 
-            if viz_dir is not None:
-                img_name = os.path.basename(dataset.img_paths[img_idx])
-                extname = os.path.splitext(img_name)[-1]
-                pred_name = img_name.replace(extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
+            # save prediction
+            Image.fromarray(pred_mask * 255).save(os.path.join(viz_dir, pred_name))
 
-                img.save(os.path.join(viz_dir, img_name))
-                Image.fromarray(whole_pred * 255).save(os.path.join(viz_dir, pred_name))
-
-                if dataset.masks is not None:
-                    mask_name = img_name.replace(extname, f'.gt{extname}')
-                    Image.fromarray(dataset.masks[img_idx] * 255).save(os.path.join(viz_dir, mask_name))
-
-            pred_masks = []
+            # save ground truth if any
+            if mask is not None:
+                mask_name = img_name.replace(extname, f'.gt{extname}')
+                Image.fromarray(mask.byte().numpy()).save(os.path.join(viz_dir, mask_name))
 
     if evaluate:
         metrics = {
@@ -130,7 +126,9 @@ def test_whole_images(model, data_dir, viz_dir=None, epoch=None,
             for k, v in metrics.items()
         }
 
+        print('Mean Overall Accuracy:', metrics['accuracy'])
         print('Mean Detection F1:', metrics['detection_f1'])
+        print('Mean Dice:', metrics['dice'])
         print('Mean Object Dice:', metrics['object_dice'])
         print('Mean Object Hausdorff:', metrics['object_hausdorff'])
 
@@ -176,7 +174,7 @@ if __name__ == '__main__':
     model.load_state_dict(ckpt['model_state_dict'])
     print(f'Loaded checkpoint from {args.checkpoint}.')
 
-    test_whole_images(model, args.dataset_path, args.output,
-                      epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
+    predict(model, args.dataset_path, args.output,
+            epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
 
     os.remove('wessup_ckpt.py')

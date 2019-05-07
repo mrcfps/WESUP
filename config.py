@@ -5,6 +5,9 @@ Configuration module.
 # Patch size for prediction (same as input size to CNN)
 PATCH_SIZE = 384
 
+# Rescale factor to subsample input images.
+RESCALE_FACTOR = 0.5
+
 # Number of target classes.
 N_CLASSES = 2
 

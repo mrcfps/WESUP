@@ -6,7 +6,7 @@ from shutil import copyfile
 import torch
 from torchvision.models import vgg13
 
-from infer import test_whole_images
+from infer import predict
 
 
 if __name__ == '__main__':
@@ -39,14 +39,14 @@ if __name__ == '__main__':
     print('\nTesting on test set A ...')
     data_dir = os.path.join(args.dataset_path, 'testA')
     output_dir = os.path.join(results_dir, 'testA')
-    test_whole_images(model, data_dir, output_dir,
+    predict(model, data_dir, output_dir,
                       epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
     print(f'Results on test set A have been saved to {output_dir}.')
 
     print('\nTesting on test set B ...')
     data_dir = os.path.join(args.dataset_path, 'testB')
     output_dir = os.path.join(results_dir, 'testB')
-    test_whole_images(model, data_dir, output_dir,
+    predict(model, data_dir, output_dir,
                       epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
     print(f'Results on test set B have been saved to {output_dir}.')
 

@@ -22,7 +22,7 @@ from utils.metrics import accuracy
 from utils.metrics import dice
 from utils.history import HistoryTracker
 from utils.preprocessing import preprocess_superpixels
-from infer import test_whole_images
+from infer import predict
 from infer import compute_mask_with_superpixel_prediction
 
 warnings.filterwarnings('ignore')
@@ -94,19 +94,12 @@ def cross_entropy(y_hat, y_true, weight=None):
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-
-    def is_empty(tensor):
-        return torch.equal(tensor, torch.tensor(0).to(device))
-
-    img, segments, mask, point_mask = data
+    img, segments, mask = data
 
     img = img.to(device)
     segments = segments.to(device).squeeze()
     mask = mask.to(device).squeeze()
-    point_mask = point_mask.to(device).squeeze()
-
-    sp_maps, sp_labels = preprocess_superpixels(segments,
-                                                point_mask if not is_empty(point_mask) else mask)
+    sp_maps, sp_labels = preprocess_superpixels(segments, mask)
 
     optimizer.zero_grad()
     metrics = dict()
@@ -142,11 +135,10 @@ def train_one_iteration(model, optimizer, phase, *data):
             loss.backward()
             optimizer.step()
 
-    if not is_empty(mask):
-        mask = mask.argmax(dim=-1)
-        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
-        metrics['pixel_acc'] = accuracy(pred_mask, mask)
-        metrics['dice'] = dice(pred_mask, mask)
+    mask = mask.argmax(dim=-1)
+    pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
+    metrics['pixel_acc'] = accuracy(pred_mask, mask)
+    metrics['dice'] = dice(pred_mask, mask)
 
     tracker.step(metrics)
 
@@ -274,7 +266,7 @@ if __name__ == '__main__':
         # test on whole images
         if epoch % config.WHOLE_IMAGE_TEST_PERIOD == 0:
             viz_dir = os.path.join(record_dir, 'viz')
-            test_whole_images(
+            predict(
                 wessup, os.path.join(args.dataset_path, 'val-whole'),
                 viz_dir=viz_dir, epoch=epoch, evaluate=False, num_workers=args.jobs
             )
