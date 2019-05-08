@@ -56,8 +56,7 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
     return pred_mask
 
 
-def predict(model, data_dir, viz_dir=None, epoch=None,
-            evaluate=True, num_workers=4):
+def predict(model, data_dir, viz_dir=None, epoch=None, num_workers=4):
     """Making inference on a directory of images.
 
     Arguments:
@@ -66,7 +65,6 @@ def predict(model, data_dir, viz_dir=None, epoch=None,
             with all images to be predicted
         viz_dir: path to store visualization and metrics results
         epoch: current training epoch
-        evaluate: whether to compute metrics
         num_workers: number of workers to load data
     """
 
@@ -75,6 +73,9 @@ def predict(model, data_dir, viz_dir=None, epoch=None,
     dataset = SegmentationDataset(data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
 
+    # whether to compute metrics
+    evaluate = dataset.mask_paths is not None
+
     if viz_dir is not None and not os.path.exists(viz_dir):
         os.mkdir(viz_dir)
 
@@ -82,22 +83,24 @@ def predict(model, data_dir, viz_dir=None, epoch=None,
         # record metrics of each image
         metrics = defaultdict(list)
 
-    for idx, data in tqdm(enumerate(dataloader)):
+    for idx, data in tqdm(enumerate(dataloader), total=len(dataset)):
         if len(data) == 3:
-            img, segments, mask = data
-            mask = mask.to(device).squeeze()
+            img, segments, _ = data
         else:
             img, segments = data
-            mask = None
 
+        orig_img = Image.open(dataset.img_paths[idx])
         img = img.to(device)
         segments = segments.to(device).squeeze()
-        sp_maps = preprocess_superpixels(segments, mask)
+        sp_maps = preprocess_superpixels(segments)
 
         sp_pred = model(img, sp_maps)
         pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
+        pred_mask = TF.to_pil_image(pred_mask.byte().cpu())
+        pred_mask = np.array(pred_mask.resize((orig_img.width, orig_img.height)))
 
-        if evaluate and mask is not None:
+        if evaluate:
+            mask = np.array(Image.open(dataset.mask_paths[idx]))
             metrics['accuracy'].append(accuracy(pred_mask, mask))
             metrics['detection_f1'].append(detection_f1(pred_mask, mask))
             metrics['dice'].append(dice(pred_mask, mask))
@@ -110,15 +113,18 @@ def predict(model, data_dir, viz_dir=None, epoch=None,
             pred_name = img_name.replace(extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
 
             # save original image
-            TF.to_pil_image(img).save(os.path.join(viz_dir, img_name))
+            orig_img.save(os.path.join(viz_dir, img_name))
 
             # save prediction
             Image.fromarray(pred_mask * 255).save(os.path.join(viz_dir, pred_name))
 
             # save ground truth if any
-            if mask is not None:
+            if evaluate:
                 mask_name = img_name.replace(extname, f'.gt{extname}')
-                Image.fromarray(mask.byte().numpy()).save(os.path.join(viz_dir, mask_name))
+                Image.fromarray(mask * 255).save(os.path.join(viz_dir, mask_name))
+
+    if viz_dir is not None:
+        print(f'Prediction has been saved to {viz_dir}.')
 
     if evaluate:
         metrics = {
@@ -127,8 +133,8 @@ def predict(model, data_dir, viz_dir=None, epoch=None,
         }
 
         print('Mean Overall Accuracy:', metrics['accuracy'])
-        print('Mean Detection F1:', metrics['detection_f1'])
         print('Mean Dice:', metrics['dice'])
+        print('Mean Detection F1:', metrics['detection_f1'])
         print('Mean Object Dice:', metrics['object_dice'])
         print('Mean Object Hausdorff:', metrics['object_hausdorff'])
 
@@ -166,15 +172,14 @@ if __name__ == '__main__':
         wessup_module = os.path.join(args.checkpoint, '..', '..', 'source', 'wessup.py')
         wessup_module = os.path.abspath(wessup_module)
     copyfile(wessup_module, 'wessup_ckpt.py')
-    wessup = import_module('wessup_ckpt')
 
-    ckpt = torch.load(args.checkpoint, map_location=device)
-    model = wessup.Wessup(ckpt['backbone'])
-    model.to(device)
-    model.load_state_dict(ckpt['model_state_dict'])
-    print(f'Loaded checkpoint from {args.checkpoint}.')
-
-    predict(model, args.dataset_path, args.output,
-            epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
-
-    os.remove('wessup_ckpt.py')
+    try:
+        wessup = import_module('wessup_ckpt')
+        ckpt = torch.load(args.checkpoint, map_location=device)
+        model = wessup.Wessup(ckpt['backbone'])
+        model.to(device)
+        model.load_state_dict(ckpt['model_state_dict'])
+        print(f'Loaded checkpoint from {args.checkpoint}.')
+        predict(model, args.dataset_path, args.output, epoch=ckpt['epoch'], num_workers=args.jobs)
+    finally:
+        os.remove('wessup_ckpt.py')

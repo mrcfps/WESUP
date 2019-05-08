@@ -24,30 +24,27 @@ if __name__ == '__main__':
 
     wessup_module = os.path.join(record_dir, 'source', 'wessup.py')
     copyfile(wessup_module, 'wessup_ckpt.py')
-    wessup = import_module('wessup_ckpt')
 
-    ckpt = torch.load(args.checkpoint, map_location=device)
-    model = wessup.Wessup(ckpt['backbone'])
-    model.to(device)
-    model.load_state_dict(ckpt['model_state_dict'])
-    print(f'Loaded checkpoint from {args.checkpoint}.')
+    try:
+        wessup = import_module('wessup_ckpt')
+        ckpt = torch.load(args.checkpoint, map_location=device)
+        model = wessup.Wessup(ckpt['backbone'])
+        model.to(device)
+        model.load_state_dict(ckpt['model_state_dict'])
+        print(f'Loaded checkpoint from {args.checkpoint}.')
 
-    results_dir = os.path.join(record_dir, 'results')
-    if not os.path.exists(results_dir):
-        os.mkdir(results_dir)
+        results_dir = os.path.join(record_dir, 'results')
+        if not os.path.exists(results_dir):
+            os.mkdir(results_dir)
 
-    print('\nTesting on test set A ...')
-    data_dir = os.path.join(args.dataset_path, 'testA')
-    output_dir = os.path.join(results_dir, 'testA')
-    predict(model, data_dir, output_dir,
-                      epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
-    print(f'Results on test set A have been saved to {output_dir}.')
+        print('\nTesting on test set A ...')
+        data_dir = os.path.join(args.dataset_path, 'testA')
+        output_dir = os.path.join(results_dir, 'testA')
+        predict(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
 
-    print('\nTesting on test set B ...')
-    data_dir = os.path.join(args.dataset_path, 'testB')
-    output_dir = os.path.join(results_dir, 'testB')
-    predict(model, data_dir, output_dir,
-                      epoch=ckpt['epoch'], evaluate=True, num_workers=args.jobs)
-    print(f'Results on test set B have been saved to {output_dir}.')
-
-    os.remove('wessup_ckpt.py')
+        print('\nTesting on test set B ...')
+        data_dir = os.path.join(args.dataset_path, 'testB')
+        output_dir = os.path.join(results_dir, 'testB')
+        predict(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
+    finally:
+        os.remove('wessup_ckpt.py')

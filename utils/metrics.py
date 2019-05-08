@@ -20,7 +20,7 @@ def convert_to_numpy(func):
 
     def wrapper(*args):
         args = [
-            arg.detach().numpy() if torch.is_tensor(arg) else arg
+            arg.detach().cpu().numpy() if torch.is_tensor(arg) else np.array(arg)
             for arg in args
         ]
         return func(*args)
@@ -39,34 +39,10 @@ def accuracy(P, G):
         accuracy: classification accuracy
     """
 
-    return (P == G).float().mean().item()
+    if torch.is_tensor(P) and torch.is_tensor(G):
+        return (P == G).float().mean().item()
 
-
-def f1(P, G):
-    """F1 score.
-
-    Arguments:
-        P: prediction tensor with arbitrary size
-        G: ground truth tensor with the same size as P
-
-    Returns:
-        f1: classification f1 score
-    """
-
-    if P.unique().size(0) > 2 or G.unique().size(0) > 2:
-        raise ValueError(
-            'F1 can only be computed when at most two classes are present'
-        )
-
-    true_positives = (P == G).sum()
-    false_positives = P.sum() - true_positives
-    false_negatives = G.sum() - true_positives
-
-    precision = true_positives / (true_positives + false_positives)
-    recall = true_positives / (true_positives + false_negatives)
-    f1 = 2*precision*recall / (precision + recall)
-
-    return f1.item()
+    return (np.array(P) == np.array(G)).mean()
 
 
 @convert_to_numpy
@@ -147,8 +123,9 @@ def dice(S, G):
         S, G = S.float(), G.float()
         dice_score = 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
         return dice_score.item()
-    else:
-        return 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
+
+    S, G = np.array(S), np.array(G)
+    return 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
 
 
 @convert_to_numpy
@@ -173,9 +150,9 @@ def object_dice(S, G):
     G_labels = np.unique(G)
     G_labels = G_labels[G_labels > 0]
 
-    if not S_labels and not G_labels == 0:
+    if len(S_labels) == 0 and len(G_labels) == 0:
         return 1
-    elif not S_labels or not G_labels == 0:
+    elif len(S_labels) == 0 or len(G_labels) == 0:
         return 0
 
     S_obj_dice = 0
