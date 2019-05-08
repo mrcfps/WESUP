@@ -17,19 +17,18 @@ class BaseExtractor(ABC):
         self.backbone = backbone
         self.conv_layers = self.get_conv_layers()
         self.feature_maps = None
-        self.fm_size = (config.PATCH_SIZE, config.PATCH_SIZE)
+        self.fm_size = None
         self.hooks = []
 
         self._register_hooks()
 
     def _hook_fn(self, module, input, output):
-        output = F.interpolate(output, self.fm_size, mode='bilinear')
-
         if self.feature_maps is None:
+            self.fm_size = (output.size(2), output.size(3))
             self.feature_maps = output.squeeze()
         else:
-            self.feature_maps = torch.cat(
-                (self.feature_maps, output.squeeze()))
+            output = F.interpolate(output, self.fm_size, mode='bilinear')
+            self.feature_maps = torch.cat((self.feature_maps, output.squeeze()))
 
     def _register_hooks(self):
         for layer in self.conv_layers:
@@ -38,7 +37,6 @@ class BaseExtractor(ABC):
     @abstractmethod
     def get_conv_layers(self):
         """Retrieve all conv layers to extract feature maps from."""
-        pass
 
     @property
     def sp_feature_length(self):

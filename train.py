@@ -22,7 +22,6 @@ from utils.metrics import accuracy
 from utils.metrics import dice
 from utils.history import HistoryTracker
 from utils.preprocessing import preprocess_superpixels
-from infer import predict
 from infer import compute_mask_with_superpixel_prediction
 
 warnings.filterwarnings('ignore')
@@ -262,11 +261,3 @@ if __name__ == '__main__':
                 'optimizer_state_dict': optimizer.state_dict(),
             }, ckpt_path)
             print(f'Save checkpoint to {ckpt_path}.')
-
-        # test on whole images
-        if epoch % config.WHOLE_IMAGE_TEST_PERIOD == 0:
-            viz_dir = os.path.join(record_dir, 'viz')
-            predict(
-                wessup, os.path.join(args.dataset_path, 'val-whole'),
-                viz_dir=viz_dir, epoch=epoch, evaluate=False, num_workers=args.jobs
-            )

@@ -246,13 +246,16 @@ class SegmentationDataset(Dataset):
             img = ColorJitter(.15, .15, .15)(img)
             img, mask = self._transform(img, mask)
 
-        img = TF.to_tensor(img)
-        segments = slic(img, n_segments=int(img.shape[0] * img.shape[1] / config.SP_AREA),
+        segments = slic(img, n_segments=int(img.width * img.height / config.SP_AREA),
                         compactness=config.SP_COMPACTNESS)
+        img = TF.to_tensor(img)
         segments = torch.LongTensor(segments)
 
         if mask is not None:
-            mask = torch.LongTensor(np.array(mask))
+            mask = np.array(mask)
+            mask = np.concatenate([np.expand_dims(mask == i, -1)
+                                   for i in range(config.N_CLASSES)], axis=-1)
+            mask = torch.LongTensor(mask.astype('int64'))
             return img, segments, mask
 
         return img, segments
