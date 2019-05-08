@@ -58,9 +58,9 @@ def f1(P, G):
             'F1 can only be computed when at most two classes are present'
         )
 
-    true_positives = (T == P).sum()
+    true_positives = (P == G).sum()
     false_positives = P.sum() - true_positives
-    false_negatives = T.sum() - true_positives
+    false_negatives = G.sum() - true_positives
 
     precision = true_positives / (true_positives + false_positives)
     recall = true_positives / (true_positives + false_negatives)
@@ -173,9 +173,9 @@ def object_dice(S, G):
     G_labels = np.unique(G)
     G_labels = G_labels[G_labels > 0]
 
-    if len(S_labels) == 0 and len(G_labels) == 0:
+    if not S_labels and not G_labels == 0:
         return 1
-    elif len(S_labels) == 0 or len(G_labels) == 0:
+    elif not S_labels or not G_labels == 0:
         return 0
 
     S_obj_dice = 0
