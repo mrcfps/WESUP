@@ -1,15 +1,5 @@
 """
-Prepare GlaS dataset with the following structure:
-
-1. Training set, in the form of raw RGB images and masks:
-    - Images: data/train/images/*.bmp
-    - Ground truth: data/train/masks/*.bmp
-2. Validation (dev) set, in the form of non-overlapping patches stored in numpy arrays:
-    - Images: data/val/images.npy
-    - Ground truth: data/val/masks.npy
-3. Test set, in the form of whole images and masks in numpy arrays:
-    - Images: data/testA/images/*.bmp, data/testB/images/*.bmp
-    - Ground truth: data/testA/masks/*.bmp, data/testB/masks/*.bmp
+Shuffle GlaS dataset to train/val/test sets.
 """
 
 import argparse
@@ -17,13 +7,9 @@ import os
 import warnings
 from shutil import copyfile
 
-import numpy as np
 import pandas as pd
 from skimage.io import imread, imsave
 from sklearn.model_selection import train_test_split
-
-from utils.tile import divide_image_to_patches
-import config
 
 warnings.filterwarnings('ignore')
 
@@ -63,7 +49,7 @@ def split_train_val_test(orig_path, val_size=0.1):
     return train_set, val_set, testA_set, testB_set
 
 
-def prepare_images(orig_path, dst_path, names, split=False):
+def prepare_images(orig_path, dst_path, names):
     if not os.path.exists(dst_path):
         os.mkdir(dst_path)
 
@@ -76,26 +62,16 @@ def prepare_images(orig_path, dst_path, names, split=False):
         img_name = '{}.bmp'.format(name)
         mask_name = '{}_anno.bmp'.format(name)
 
-        if split:
-            img = imread(os.path.join(orig_path, img_name))
-            mask = (imread(os.path.join(orig_path, mask_name)) > 0).astype('uint8')
-            img_patches = divide_image_to_patches(img, config.PATCH_SIZE, pad=False)
-            mask_patches = divide_image_to_patches(mask, config.PATCH_SIZE, pad=False)
+        orig_img_path = j(orig_path, img_name)
+        dst_img_path = j(dst_img_dir, img_name)
+        orig_mask_path = j(orig_path, mask_name)
+        dst_mask_path = j(dst_mask_dir, img_name)
 
-            for idx, (img_patch, mask_patch) in enumerate(zip(img_patches, mask_patches)):
-                imsave(j(dst_img_dir, f'{name}-{idx}.bmp'), np.squeeze(img_patch))
-                imsave(j(dst_mask_dir, f'{name}-{idx}.bmp'), np.squeeze(mask_patch))
-        else:
-            orig_img_path = j(orig_path, img_name)
-            dst_img_path = j(dst_img_dir, img_name)
-            orig_mask_path = j(orig_path, mask_name)
-            dst_mask_path = j(dst_mask_dir, img_name)
+        # copy original image to destination
+        copyfile(orig_img_path, dst_img_path)
 
-            # copy original image to destination
-            copyfile(orig_img_path, dst_img_path)
-
-            # save binarized mask to destination
-            imsave(dst_mask_path, (imread(orig_mask_path) > 0).astype('uint8'))
+        # save binarized mask to destination
+        imsave(dst_mask_path, (imread(orig_mask_path) > 0).astype('uint8'))
 
 
 if __name__ == '__main__':
@@ -110,18 +86,14 @@ if __name__ == '__main__':
 
     train_dir = j(args.output, 'train')
     val_dir = j(args.output, 'val')
-    val_whole_dir = j(args.output, 'val-whole')
     testA_dir = j(args.output, 'testA')
     testB_dir = j(args.output, 'testB')
 
     prepare_images(args.dataset_path, train_dir, train_set)
     print('Training data is done.')
 
-    prepare_images(args.dataset_path, val_dir, val_set, split=True)
-    print('Validation data (patches) is done.')
-
-    prepare_images(args.dataset_path, val_whole_dir, val_set)
-    print('Validation data (whole images) is done.')
+    prepare_images(args.dataset_path, val_dir, val_set)
+    print('Validation data is done.')
 
     prepare_images(args.dataset_path, testA_dir, testA_set)
     print('TestA data is done.')

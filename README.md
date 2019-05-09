@@ -23,14 +23,7 @@ data_glas
 │   └── masks
 │       ├── train-1.png
 │       └── train-2.png
-├── val
-│   ├── images
-│   │   ├── val-1.png
-│   │   └── val-2.png
-│   └── masks
-│       ├── val-1.png
-│       └── val-2.png
-└── val-whole
+└── val
     ├── images
     │   ├── val-1.png
     │   └── val-2.png
@@ -38,12 +31,6 @@ data_glas
         ├── val-1.png
         └── val-2.png
 ```
-
-Note that:
-
-- `train` directory contains original images and masks
-- `val` directory contains cropped patches to be validated
-- `val-whole` directory contains whole images and masks to be validated
 
 #### Generating point labels
 
@@ -105,11 +92,6 @@ records/20190423-1122-AM
 │   ├── loss.png
 │   ├── pixel_acc.png
 │   └── sp_acc.png
-├── viz
-│   ├── metrics.csv
-│   ├── train_1.png
-│   ├── train_1.pred.png
-│   └── train_1.gt.png
 ├── history.csv
 ├── params
 │   ├── 0.json
@@ -120,7 +102,6 @@ records/20190423-1122-AM
 - `checkpoints` directory stores all training checkpoints
 - `curves` stores learning curves for loss and all metrics
 - `params` stores CLI and configuration parameters
-- `viz` contains visualization of model predictions and whole image metrics
 - `source` stores a snapshot of all source code file
 - `history.csv` records the training history
 
