@@ -33,10 +33,6 @@ def prepare_record_dir():
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
-    viz_dir = os.path.join(record_dir, 'viz')
-    if not os.path.exists(viz_dir):
-        os.mkdir(viz_dir)
-
     return record_dir
 
 
@@ -86,6 +82,15 @@ def plot_learning_curves(history_path):
 
     for key in history.columns:
         if key.startswith('val_'):
+            if key.replace('val_', '') not in history.columns:
+                # plot metrics computed only on validation phase
+                plt.figure(dpi=200)
+                plt.title('Model ' + key.replace('val_', ''))
+                plt.plot(history[key])
+                plt.ylabel(key.replace('val_', '').capitalize())
+                plt.xlabel('Epoch')
+                plt.grid(True)
+                plt.savefig(os.path.join(curves_dir, f'{key}.png'))
             continue
 
         plt.figure(dpi=200)

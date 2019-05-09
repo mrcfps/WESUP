@@ -20,6 +20,9 @@ from utils.semi import label_propagate
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
 from utils.metrics import dice
+from utils.metrics import detection_f1
+from utils.metrics import object_dice
+from utils.metrics import object_hausdorff
 from utils.history import HistoryTracker
 from utils.preprocessing import preprocess_superpixels
 from infer import compute_mask_with_superpixel_prediction
@@ -115,10 +118,9 @@ def train_one_iteration(model, optimizer, phase, *data):
         # number of labeled superpixels
         labeled_num = sp_labels.size(0)
 
-        metrics['labeled_sp_ratio'] = labeled_num / total_num
-
         if labeled_num < total_num:
             # weakly-supervised mode
+            metrics['labeled_sp_ratio'] = labeled_num / total_num
             propagated_labels = label_propagate(model.clf_input_features, sp_labels,
                                                 config.PROPAGATE_THRESHOLD)
             metrics['propagated_labels'] = propagated_labels.sum().item()
@@ -138,6 +140,12 @@ def train_one_iteration(model, optimizer, phase, *data):
     pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
     metrics['pixel_acc'] = accuracy(pred_mask, mask)
     metrics['dice'] = dice(pred_mask, mask)
+
+    # calculate object-level metrics in validation phase
+    if phase == 'val':
+        metrics['detection_f1'] = detection_f1(pred_mask, mask)
+        metrics['object_dice'] = object_dice(pred_mask, mask)
+        metrics['object_hausdorff'] = object_hausdorff(pred_mask, mask)
 
     tracker.step(metrics)
 
@@ -231,7 +239,7 @@ if __name__ == '__main__':
 
     if not args.no_lr_decay:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                         factor=0.5, min_lr=1e-5,
+                                                         factor=0.5, min_lr=1e-7,
                                                          verbose=True)
 
     for epoch in range(initial_epoch, total_epochs + 1):
