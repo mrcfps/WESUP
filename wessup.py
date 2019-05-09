@@ -22,12 +22,15 @@ class BaseExtractor(ABC):
 
         self._register_hooks()
 
-    def _hook_fn(self, module, input, output):
+    def _hook_fn(self, _, input_, output):
         if self.feature_maps is None:
-            self.fm_size = (output.size(2), output.size(3))
+            self.fm_size = (input_[0].size(2), input_[0].size(3))
+
+        output = F.interpolate(output, self.fm_size, mode='bilinear')
+
+        if self.feature_maps is None:
             self.feature_maps = output.squeeze()
         else:
-            output = F.interpolate(output, self.fm_size, mode='bilinear')
             self.feature_maps = torch.cat((self.feature_maps, output.squeeze()))
 
     def _register_hooks(self):
@@ -49,10 +52,6 @@ class BaseExtractor(ABC):
         _ = self.backbone(x)
 
         return self.feature_maps
-
-    def close(self):
-        for hook in self.hooks:
-            hook.remove()
 
 
 class VGGExtractor(BaseExtractor):
@@ -143,8 +142,10 @@ class Wessup(nn.Module):
 
         # fully-connected layers for dimensionality reduction
         self.fc_layers = nn.Sequential(
-            self._build_fc_layer(self.extractor.sp_feature_length, 1024),
-            self._build_fc_layer(1024, 1024),
+            nn.Linear(self.extractor.sp_feature_length, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
             nn.Linear(1024, 32),
             nn.ReLU()
         )
@@ -163,14 +164,6 @@ class Wessup(nn.Module):
 
     def _hook_fn(self, module, input, output):
         self.clf_input_features = output
-
-    def _build_fc_layer(self, in_features, out_features):
-        return nn.Sequential(
-            nn.Linear(in_features, out_features),
-            nn.ReLU(),
-            nn.BatchNorm1d(out_features),
-            nn.Dropout()
-        )
 
     def forward(self, x, sp_maps):
         # extract conv feature maps and flatten
