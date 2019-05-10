@@ -235,7 +235,7 @@ if __name__ == '__main__':
 
     if not args.no_lr_decay:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                         factor=0.5, min_lr=1e-7,
+                                                         factor=0.1, min_lr=1e-7,
                                                          verbose=True)
 
     print('\nTraining Stage')
