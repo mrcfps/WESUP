@@ -26,6 +26,7 @@ from utils.metrics import object_hausdorff
 from utils.history import HistoryTracker
 from utils.preprocessing import preprocess_superpixels
 from infer import compute_mask_with_superpixel_prediction
+from infer import predict
 
 warnings.filterwarnings('ignore')
 
@@ -55,7 +56,7 @@ def build_cli_parser():
                         help='Number of warmup epochs (freeze CNN) before training')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preparing superpixels')
-    parser.add_argument('-b', '--backbone', default='vgg13',
+    parser.add_argument('-b', '--backbone', default='vgg16',
                         help='CNN backbone to use (such as vgg13, resnet50 and densenet121)')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
@@ -178,16 +179,40 @@ if __name__ == '__main__':
 
     if args.resume_ckpt is not None:
         record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
-        tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
-
         checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
         # load previous model states
         backbone = checkpoint['backbone']
         wessup = Wessup(backbone)
         wessup.load_state_dict(checkpoint['model_state_dict'])
-        wessup.to(device)
+    else:  # train a new model
+        record_dir = record.prepare_record_dir()
+        record.copy_source_files(record_dir)
 
+        # create new model
+        wessup = Wessup(args.backbone)
+
+    wessup.to(device)
+    tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
+    record.save_params(record_dir, args)
+
+    if args.warmup > 0:
+        # only optimize classifier of wessup
+        optimizer = optim.SGD(
+            wessup.classifier.parameters(),
+            lr=0.005,
+            momentum=config.MOMENTUM,
+            weight_decay=config.WEIGHT_DECAY
+        )
+
+        print('\nWarmup Stage')
+        print('=' * 20)
+        for epoch in range(1, args.warmup + 1):
+            print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
+            print('-' * 10)
+            train_one_epoch(wessup, optimizer, epoch)
+
+    if args.resume_ckpt is not None:
         # load previous optimizer states and set learning rate to given value
         optimizer = optim.SGD(
             wessup.parameters(),
@@ -197,32 +222,7 @@ if __name__ == '__main__':
         optimizer.param_groups[0]['lr'] = args.lr
 
         initial_epoch = checkpoint['epoch'] + 1
-    else:  # train a new model
-        record_dir = record.prepare_record_dir()
-        record.copy_source_files(record_dir)
-
-        tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
-
-        # create new model
-        wessup = Wessup(args.backbone)
-        wessup.to(device)
-
-        if args.warmup > 0:
-            # only optimize classifier of wessup
-            optimizer = optim.SGD(
-                wessup.classifier.parameters(),
-                lr=0.005,
-                momentum=config.MOMENTUM,
-                weight_decay=config.WEIGHT_DECAY
-            )
-
-            print('\nWarmup Stage')
-            print('=' * 20)
-            for epoch in range(1, args.warmup + 1):
-                print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
-                print('-' * 10)
-                train_one_epoch(wessup, optimizer, epoch)
-
+    else:
         optimizer = optim.SGD(
             wessup.parameters(),
             lr=args.lr,
@@ -231,16 +231,15 @@ if __name__ == '__main__':
         )
         initial_epoch = 1
 
-    record.save_params(record_dir, args)
-
-    print('\nTraining Stage')
-    print('=' * 20)
     total_epochs = args.epochs + initial_epoch - 1
 
     if not args.no_lr_decay:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
                                                          factor=0.5, min_lr=1e-7,
                                                          verbose=True)
+
+    print('\nTraining Stage')
+    print('=' * 20)
 
     for epoch in range(initial_epoch, total_epochs + 1):
         print('\nEpoch {}/{}'.format(epoch, total_epochs))
@@ -269,3 +268,17 @@ if __name__ == '__main__':
                 'optimizer_state_dict': optimizer.state_dict(),
             }, ckpt_path)
             print(f'Save checkpoint to {ckpt_path}.')
+
+    results_dir = os.path.join(record_dir, 'results')
+    if not os.path.exists(results_dir):
+        os.mkdir(results_dir)
+
+    print('\nTesting on test set A ...')
+    data_dir = os.path.join(args.dataset_path, 'testA')
+    output_dir = os.path.join(results_dir, 'testA')
+    predict(wessup, data_dir, output_dir, epoch=epoch, num_workers=args.jobs)
+
+    print('\nTesting on test set B ...')
+    data_dir = os.path.join(args.dataset_path, 'testB')
+    output_dir = os.path.join(results_dir, 'testB')
+    predict(wessup, data_dir, output_dir, epoch=epoch, num_workers=args.jobs)
