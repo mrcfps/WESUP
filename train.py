@@ -138,7 +138,7 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     mask = mask.argmax(dim=-1)
     pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
-    pred_mask = pred_mask.argmax(dim=0)
+    pred_mask = pred_mask.argmax(dim=-1)
     metrics['pixel_acc'] = accuracy(pred_mask, mask)
     metrics['dice'] = dice(pred_mask, mask)
 
