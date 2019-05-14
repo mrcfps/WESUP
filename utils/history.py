@@ -1,6 +1,9 @@
+import argparse
 import csv
 import os
 from collections import defaultdict
+
+import pandas as pd
 
 
 class HistoryTracker:
@@ -52,3 +55,35 @@ class HistoryTracker:
             with open(self.save_path, 'a') as fp:
                 writer = csv.writer(fp)
                 writer.writerow(metrics + [self.learning_rate])
+
+    def report(self, last_n_epochs=5):
+        """Report training history summary.
+
+        Arguments:
+            last_n_epochs: number of final epochs to compute average losses and metrics.
+        """
+
+        df = pd.read_csv(self.save_path)
+        print('Training Summary')
+        print('=' * 20)
+        print('pixel_acc\t\t', df['pixel_acc'][-last_n_epochs:].mean())
+        print('dice\t\t\t', df['dice'][-last_n_epochs:].mean())
+        print('val_pixel_acc\t\t', df['val_pixel_acc'][-last_n_epochs:].mean())
+        print('val_dice\t\t', df['val_dice'][-last_n_epochs:].mean())
+        print('val_detection_f1\t', df['val_detection_f1'][-last_n_epochs:].mean())
+        print('val_object_dice\t\t', df['val_object_dice'][-last_n_epochs:].mean())
+        print('val_object_hausdorff\t', df['val_object_hausdorff'][-last_n_epochs:].mean())
+
+        if 'labeled_sp_ratio' in df:
+            print('sp_ratio', df['labeled_sp_ratio'].mean())
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('csv_path', help='Path to history csv file')
+    parser.add_argument('-l', '--last-n-epochs', type=int, default=5,
+                        help='Number of final epochs to compute average losses and metrics')
+    args = parser.parse_args()
+
+    tracker = HistoryTracker(args.csv_path)
+    tracker.report(args.last_n_epochs)

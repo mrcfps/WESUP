@@ -26,7 +26,6 @@ from utils.metrics import object_hausdorff
 from utils.history import HistoryTracker
 from utils.preprocessing import preprocess_superpixels
 from infer import compute_mask_with_superpixel_prediction
-from infer import predict
 
 warnings.filterwarnings('ignore')
 
@@ -139,6 +138,7 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     mask = mask.argmax(dim=-1)
     pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
+    pred_mask = pred_mask.argmax(dim=0)
     metrics['pixel_acc'] = accuracy(pred_mask, mask)
     metrics['dice'] = dice(pred_mask, mask)
 
@@ -235,7 +235,7 @@ if __name__ == '__main__':
 
     if not args.no_lr_decay:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                         factor=0.1, min_lr=1e-7,
+                                                         factor=0.5, min_lr=1e-7,
                                                          verbose=True)
 
     print('\nTraining Stage')
@@ -269,16 +269,4 @@ if __name__ == '__main__':
             }, ckpt_path)
             print(f'Save checkpoint to {ckpt_path}.')
 
-    results_dir = os.path.join(record_dir, 'results')
-    if not os.path.exists(results_dir):
-        os.mkdir(results_dir)
-
-    print('\nTesting on test set A ...')
-    data_dir = os.path.join(args.dataset_path, 'testA')
-    output_dir = os.path.join(results_dir, 'testA')
-    predict(wessup, data_dir, output_dir, epoch=epoch, num_workers=args.jobs)
-
-    print('\nTesting on test set B ...')
-    data_dir = os.path.join(args.dataset_path, 'testB')
-    output_dir = os.path.join(results_dir, 'testB')
-    predict(wessup, data_dir, output_dir, epoch=epoch, num_workers=args.jobs)
+    tracker.report()
