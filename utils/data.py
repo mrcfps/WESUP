@@ -10,6 +10,8 @@ from functools import partial
 import numpy as np
 from PIL import Image
 from skimage.segmentation import slic
+from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.filters import gaussian_filter
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -26,6 +28,69 @@ def _list_images(path):
     for ext in ('jpg', 'jpeg', 'png', 'bmp'):
         images.extend(glob.glob(os.path.join(path, f'*.{ext}')))
     return sorted(images)
+
+
+def _transform_multiple_images(*imgs):
+    """Apply identical transformations to multiple PIL images."""
+
+    def rnd(lower_bound, upper_bound):
+        rnd = random.random()
+        return lower_bound + (upper_bound - lower_bound) * rnd
+
+    def elastic_transform(image, alpha, sigma, spline_order=1, mode='nearest', random_state=42):
+        """Elastic deformation of image as described in [Simard2003]_.
+        .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+        Convolutional Neural Networks applied to Visual Document Analysis", in
+        Proc. of the International Conference on Document Analysis and
+        Recognition, 2003.
+        """
+
+        np.random.seed(random_state)
+        image = np.array(image)
+        shape = image.shape[:2]
+
+        dx = gaussian_filter((np.random.rand(*shape) * 2 - 1),
+                             sigma, mode="constant", cval=0) * alpha
+        dy = gaussian_filter((np.random.rand(*shape) * 2 - 1),
+                             sigma, mode="constant", cval=0) * alpha
+
+        x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+        indices = [np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))]
+
+        if image.ndim == 2:
+            result = map_coordinates(image, indices, order=spline_order, mode=mode).reshape(shape)
+        else:
+            result = np.empty_like(image)
+            for i in range(image.shape[2]):
+                result[:, :, i] = map_coordinates(
+                    image[:, :, i], indices, order=spline_order, mode=mode).reshape(shape)
+
+        return Image.fromarray(result)
+
+    transforms = (
+        (1, partial(elastic_transform,
+                    alpha=rnd(0, 1000),
+                    sigma=rnd(20, 50),
+                    random_state=np.random.randint(100))
+        ),
+        (1, partial(TF.affine,
+                    angle=rnd(-20, 20),
+                    translate=(rnd(-20, 20), rnd(-20, 20)),
+                    scale=rnd(1, 1.4),
+                    shear=0)
+        ),
+        (0.5, TF.hflip),
+        (0.5, TF.vflip),
+    )
+
+    for prob, transform in transforms:
+        if random.random() < prob:
+            imgs = [transform(img) if img is not None else None for img in imgs]
+
+    if len(imgs) == 1:
+        return imgs[0]
+
+    return imgs
 
 
 class SegmentationDataset(Dataset):
@@ -62,8 +127,8 @@ class SegmentationDataset(Dataset):
 
         if self.train:
             # perform data augmentation
-            img = ColorJitter(.15, .15, .15)(img)
-            img, mask = self._transform(img, mask)
+            img = ColorJitter(.3, .3, .3)(img)
+            img, mask = _transform_multiple_images(img, mask)
 
         segments = slic(img, n_segments=int(img.width * img.height / config.SP_AREA),
                         compactness=config.SP_COMPACTNESS)
@@ -78,31 +143,6 @@ class SegmentationDataset(Dataset):
             return img, segments, mask
 
         return img, segments
-
-    def _transform(self, *imgs):
-        def _rnd(lower_bound, upper_bound):
-            rnd = random.random()
-            return lower_bound + (upper_bound - lower_bound) * rnd
-
-        transforms = (
-            (1, partial(TF.affine,
-                        angle=_rnd(-10, 10),
-                        translate=(_rnd(-10, 10), _rnd(-10, 10)),
-                        scale=_rnd(1, 1.2),
-                        shear=0)
-            ),
-            (0.5, TF.hflip),
-            (0.5, TF.vflip),
-        )
-
-        for prob, transform in transforms:
-            if random.random() < prob:
-                imgs = [transform(img) if img is not None else None for img in imgs]
-
-        if len(imgs) == 1:
-            return imgs[0]
-
-        return imgs
 
     def summary(self):
         mode = 'training' if self.train else 'inference'
