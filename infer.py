@@ -12,11 +12,12 @@ from shutil import copyfile
 
 import torch
 from torch.utils.data import DataLoader
-import torchvision.transforms.functional as TF
 
 import numpy as np
+import pydensecrf.densecrf as dcrf
 from tqdm import tqdm
 from PIL import Image
+from skimage.transform import resize
 
 import config
 from utils.data import SegmentationDataset
@@ -39,16 +40,16 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
         sp_maps: superpixel maps with size (N, H, W)
 
     Returns:
-        pred_mask: segmentation pprediction with size (H, W)
+        pred_mask: segmentation pprediction with size (H, W, n_classes)
     """
-
-    sp_pred = sp_pred.argmax(dim=-1)
 
     # flatten sp_maps to one channel
     sp_maps = sp_maps.argmax(dim=0)
 
     # initialize prediction mask
-    pred_mask = torch.zeros_like(sp_maps).to(sp_maps.device)
+    height, width = sp_maps.size()
+    pred_mask = torch.zeros(height, width, sp_pred.size(1))
+    pred_mask = pred_mask.to(sp_maps.device)
 
     for sp_idx in range(sp_maps.max().item() + 1):
         pred_mask[sp_maps == sp_idx] = sp_pred[sp_idx]
@@ -56,48 +57,112 @@ def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
     return pred_mask
 
 
-def predict(model, data_dir, viz_dir=None, epoch=None, num_workers=4):
-    """Making inference on a directory of images.
+def predict(model, dataloader):
+    """Predict on a directory of images.
+
+    Arguments:
+        model: inference model (should be a `torch.nn.Module`)
+        dataloader: PyTorch DataLoader instance
+
+    Returns:
+        predictions: a list of predicted mask, each of which is a tensor of
+            size (H, W, n_classes)
+    """
+
+    model.eval()
+    device = next(model.parameters()).device
+
+    predictions = []
+
+    for data in tqdm(dataloader):
+        if len(data) == 3:
+            img, segments, _ = data
+        else:
+            img, segments = data
+
+        img = img.to(device)
+        segments = segments.to(device).squeeze()
+        sp_maps = preprocess_superpixels(segments)
+
+        with torch.no_grad():
+            sp_pred = model(img, sp_maps)
+
+        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
+        predictions.append(pred_mask)
+
+    return predictions
+
+
+def crf_postprocess(img, pred_mask):
+    """Post-processing using dense CRF.
+
+    Arguments:
+        img: original PIL image
+        pred_mask: prediction mask array with shape (H, W, n_classes)
+
+    Returns
+    """
+
+    h, w = pred_mask.shape[0], pred_mask.shape[1]
+    img = np.array(img.resize((w, h), resample=Image.BILINEAR))
+    d = dcrf.DenseCRF2D(w, h, 2)
+
+    U = -np.log(pred_mask).transpose(2, 0, 1).reshape((2, -1))
+    U = np.ascontiguousarray(U)
+    img = np.ascontiguousarray(img)
+
+    d.setUnaryEnergy(U)
+    d.addPairwiseGaussian(sxy=1, compat=10)
+    d.addPairwiseBilateral(sxy=10, srgb=10, rgbim=img, compat=10)
+
+    Q = d.inference(5)
+    Q = np.argmax(np.array(Q), axis=0).reshape((h, w))
+
+    return Q
+
+
+def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=4):
+    """Making inference on a directory of images
 
     Arguments:
         model: inference model (should be a `torch.nn.Module`)
         data_dir: path to dataset, which should contains at least a subdirectory `images`
             with all images to be predicted
         viz_dir: path to store visualization and metrics results
+        use_crf: whether to apply CRF post-processing
         epoch: current training epoch
         num_workers: number of workers to load data
     """
 
-    model.eval()
-    device = next(model.parameters()).device
     dataset = SegmentationDataset(data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
 
-    # whether to compute metrics
-    evaluate = dataset.mask_paths is not None
+    print(f'Predicting {len(dataset)} images ...')
+    predictions = predict(model, dataloader)
 
     if viz_dir is not None and not os.path.exists(viz_dir):
         os.mkdir(viz_dir)
+
+    # whether to compute metrics
+    evaluate = dataset.mask_paths is not None
 
     if evaluate:
         # record metrics of each image
         metrics = defaultdict(list)
 
-    for idx, data in tqdm(enumerate(dataloader), total=len(dataset)):
-        if len(data) == 3:
-            img, segments, _ = data
-        else:
-            img, segments = data
-
+    print('Computing metrics ...')
+    for idx, pred_mask in tqdm(enumerate(predictions), total=len(predictions)):
         orig_img = Image.open(dataset.img_paths[idx])
-        img = img.to(device)
-        segments = segments.to(device).squeeze()
-        sp_maps = preprocess_superpixels(segments)
+        pred_mask = pred_mask.cpu().numpy()
 
-        sp_pred = model(img, sp_maps)
-        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
-        pred_mask = TF.to_pil_image(pred_mask.byte().cpu())
-        pred_mask = np.array(pred_mask.resize((orig_img.width, orig_img.height)))
+        if use_crf:
+            pred_mask = crf_postprocess(orig_img, pred_mask)
+        else:
+            pred_mask = pred_mask.argmax(axis=-1)
+
+        # resize mask to match the size of original image
+        pred_mask = resize(pred_mask, (orig_img.height, orig_img.width), order=0, preserve_range=True)
+        pred_mask = pred_mask.astype('uint8')
 
         if evaluate:
             mask = np.array(Image.open(dataset.mask_paths[idx]))
@@ -177,9 +242,9 @@ if __name__ == '__main__':
         wessup = import_module('wessup_ckpt')
         ckpt = torch.load(args.checkpoint, map_location=device)
         model = wessup.Wessup(ckpt['backbone'])
-        model.to(device)
+        model = model.to(device)
         model.load_state_dict(ckpt['model_state_dict'])
         print(f'Loaded checkpoint from {args.checkpoint}.')
-        predict(model, args.dataset_path, args.output, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, args.dataset_path, args.output, epoch=ckpt['epoch'], num_workers=args.jobs)
     finally:
         os.remove('wessup_ckpt.py')

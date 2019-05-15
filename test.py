@@ -4,9 +4,8 @@ from importlib import import_module
 from shutil import copyfile
 
 import torch
-from torchvision.models import vgg13
 
-from infer import predict
+from infer import infer
 
 
 if __name__ == '__main__':
@@ -40,11 +39,11 @@ if __name__ == '__main__':
         print('\nTesting on test set A ...')
         data_dir = os.path.join(args.dataset_path, 'testA')
         output_dir = os.path.join(results_dir, 'testA')
-        predict(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
 
         print('\nTesting on test set B ...')
         data_dir = os.path.join(args.dataset_path, 'testB')
         output_dir = os.path.join(results_dir, 'testB')
-        predict(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
     finally:
         os.remove('wessup_ckpt.py')

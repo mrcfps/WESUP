@@ -9,3 +9,6 @@ torch
 torchvision
 
 tqdm
+
+cython
+pydensecrf
