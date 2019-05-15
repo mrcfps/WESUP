@@ -66,16 +66,10 @@ class HistoryTracker:
         df = pd.read_csv(self.save_path)
         print('Training Summary')
         print('=' * 20)
-        print('pixel_acc\t\t', df['pixel_acc'][-last_n_epochs:].mean())
-        print('dice\t\t\t', df['dice'][-last_n_epochs:].mean())
-        print('val_pixel_acc\t\t', df['val_pixel_acc'][-last_n_epochs:].mean())
-        print('val_dice\t\t', df['val_dice'][-last_n_epochs:].mean())
-        print('val_detection_f1\t', df['val_detection_f1'][-last_n_epochs:].mean())
-        print('val_object_dice\t\t', df['val_object_dice'][-last_n_epochs:].mean())
-        print('val_object_hausdorff\t', df['val_object_hausdorff'][-last_n_epochs:].mean())
 
-        if 'labeled_sp_ratio' in df:
-            print('sp_ratio', df['labeled_sp_ratio'].mean())
+        for key in df.keys():
+            if key not in ['lr', 'loss', 'val_loss']:
+                print('{:20s} {:.4f}'.format(key, df[key][-last_n_epochs:].mean()))
 
 
 if __name__ == '__main__':
