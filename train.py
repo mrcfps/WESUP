@@ -151,8 +151,9 @@ def train_one_iteration(model, optimizer, phase, *data):
     tracker.step(metrics)
 
 
-def train_one_epoch(model, optimizer):
-    for phase in ['train', 'val']:
+def train_one_epoch(model, optimizer, warmup=False):
+    phases = ['train'] if warmup else ['train', 'val']
+    for phase in phases:
         print(f'{phase.capitalize()} phase:')
 
         if phase == 'train':
@@ -161,6 +162,9 @@ def train_one_epoch(model, optimizer):
         else:
             model.eval()
             tracker.eval()
+
+        if warmup:
+            model.backbone.eval()
 
         pbar = tqdm(dataloaders[phase])
         for data in pbar:
@@ -210,7 +214,7 @@ if __name__ == '__main__':
         for epoch in range(1, args.warmup + 1):
             print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
             print('-' * 10)
-            train_one_epoch(wessup, optimizer, epoch)
+            train_one_epoch(wessup, optimizer, warmup=True)
 
     if args.resume_ckpt is not None:
         # load previous optimizer states and set learning rate to given value
