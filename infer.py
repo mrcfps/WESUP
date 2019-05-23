@@ -75,10 +75,7 @@ def predict(model, dataloader):
     predictions = []
 
     for data in tqdm(dataloader):
-        if len(data) == 3:
-            img, segments, _ = data
-        else:
-            img, segments = data
+        img, segments = data[:2]
 
         img = img.to(device)
         segments = segments.to(device).squeeze()

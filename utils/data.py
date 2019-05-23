@@ -10,6 +10,7 @@ from functools import partial
 import numpy as np
 from PIL import Image
 from skimage.segmentation import slic
+from skimage.feature import greycomatrix
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 
@@ -93,6 +94,17 @@ def _transform_multiple_images(*imgs):
     return imgs
 
 
+def _compute_adjaceny_matrix(arr):
+    """Compute adjacency matrix for superpixels using GLCM (Grey-Level Co-occurence Matrix)."""
+
+    glcm = greycomatrix(arr, [1], [0, 0.5 * np.pi, np.pi, 1.5 * np.pi],
+                        levels=arr.max() + 1)
+    glcm = glcm.sum(axis=-1)[..., 0]
+    glcm = glcm * (1 - np.eye(glcm.shape[0]))
+
+    return (glcm > 0).astype('uint8')
+
+
 class SegmentationDataset(Dataset):
     """One-shot segmentation dataset."""
 
@@ -132,17 +144,20 @@ class SegmentationDataset(Dataset):
 
         segments = slic(img, n_segments=int(img.width * img.height / config.SP_AREA),
                         compactness=config.SP_COMPACTNESS)
+        adjacency = _compute_adjaceny_matrix(segments)
+
         img = TF.to_tensor(img)
         segments = torch.LongTensor(segments)
+        adjacency = torch.ByteTensor(adjacency)
 
         if mask is not None:
             mask = np.array(mask)
             mask = np.concatenate([np.expand_dims(mask == i, -1)
                                    for i in range(config.N_CLASSES)], axis=-1)
             mask = torch.LongTensor(mask.astype('int64'))
-            return img, segments, mask
+            return img, segments, adjacency, mask
 
-        return img, segments
+        return img, segments, adjacency
 
     def summary(self):
         mode = 'training' if self.train else 'inference'

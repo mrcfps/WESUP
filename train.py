@@ -66,14 +66,15 @@ def build_cli_parser():
     return parser
 
 
-def cross_entropy(y_hat, y_true, weight=None):
+def cross_entropy(y_hat, y_true, sp_weights=None, class_weights=None):
     """Semi-supervised cross entropy loss function.
 
     Args:
-        y_hat: prediction tensor with size (N, c), where c is the number of classes
-        y_true: label tensor with size (N, c). A sample won't be counted into loss
+        y_hat: prediction tensor with size (N, C), where C is the number of classes
+        y_true: label tensor with size (N, C). A sample won't be counted into loss
             if its label is all zeros.
-        weight: class weight tensor with size (c,)
+        sp_weights: superpixel weights tensor with size (N,)
+        class_weights: class weights tensor with size (C,)
 
     Returns:
         cross_entropy: cross entropy loss computed only on samples with labels
@@ -89,25 +90,31 @@ def cross_entropy(y_hat, y_true, weight=None):
         return torch.tensor(0.)
 
     ce = -y_true * torch.log(y_hat)
-    if weight is not None:
-        ce = ce * weight.unsqueeze(0)
+
+    if sp_weights is not None:
+        ce = ce * sp_weights.unsqueeze(1)
+
+    if class_weights is not None:
+        ce = ce * class_weights.unsqueeze(0)
 
     return torch.sum(ce) / labeled_samples
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    img, segments, mask = data
+    img, segments, adjacency, mask = data
 
     img = img.to(device)
     segments = segments.to(device).squeeze()
+    adjacency = adjacency.to(device).squeeze()
     mask = mask.to(device).squeeze()
-    sp_maps, sp_labels = preprocess_superpixels(segments, mask)
+    sp_maps, sp_labels, sp_weights = preprocess_superpixels(segments, adjacency, mask)
 
     optimizer.zero_grad()
     metrics = dict()
 
     # weighted cross entropy
-    ce = partial(cross_entropy, weight=torch.Tensor(config.CLASS_WEIGHTS).to(device))
+    ce = partial(cross_entropy,
+                 class_weights=torch.Tensor(config.CLASS_WEIGHTS).to(device))
 
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
@@ -124,12 +131,15 @@ def train_one_iteration(model, optimizer, phase, *data):
             propagated_labels = label_propagate(model.clf_input_features, sp_labels,
                                                 config.PROPAGATE_THRESHOLD)
             metrics['propagated_labels'] = propagated_labels.sum().item()
-            loss = ce(sp_pred[:labeled_num], sp_labels)
-            propagate_loss = config.PROPAGATE_WEIGHT * ce(sp_pred[labeled_num:], propagated_labels)
+
+            loss = ce(sp_pred[:labeled_num], sp_labels,
+                      sp_weights=sp_weights[:labeled_num])
+            propagate_loss = ce(sp_pred[labeled_num:], propagated_labels,
+                                sp_weights=sp_weights[labeled_num])
             metrics['propagate_loss'] = propagate_loss.item()
-            loss += propagate_loss
+            loss += config.PROPAGATE_WEIGHT * propagate_loss
         else:  # fully-supervised mode
-            loss = ce(sp_pred, sp_labels)
+            loss = ce(sp_pred, sp_labels, sp_weights=sp_weights)
 
         metrics['loss'] = loss.item()
         if phase == 'train':

@@ -12,17 +12,30 @@ def _compute_superpixel_label(mask, segments, sp_idx):
     return sp_mask.sum(dim=(0, 1)) / (sp_mask.sum() + config.EPSILON)
 
 
-def preprocess_superpixels(segments, mask=None):
+def _compute_superpixel_weight(sp_labels, adjacency, sp_idx):
+    # indexes of neighboring superpixels
+    neighbors = adjacency[sp_idx].nonzero().squeeze()
+
+    # number of appearances of all classes
+    classes_count = sp_labels[neighbors].sum(dim=0)
+
+    weight = torch.min(classes_count) / (torch.max(classes_count) + config.EPSILON)
+
+    return 1 + torch.sqrt(weight)
+
+
+def preprocess_superpixels(segments, adjacency=None, mask=None):
     """Segment superpixels of a given image and return segment maps and their labels.
 
     Arguments:
-        segments: slic segments tensor with shape (H, W)
-        mask (optional): annotation mask tensor with shape (H, W, C). Each pixel is a one-hot
+        segments: slic segments tensor with size (H, W)
+        adjacency (optional): superpixels adjacency matrix of size (N, N)
+        mask (optional): annotation mask tensor with size (H, W, C). Each pixel is a one-hot
             encoded label vector. If this vector is all zeros, then its class is unknown.
 
-    Returns
-        sp_maps: superpixel maps with shape (n_superpixels, H, W)
-        sp_labels: superpixel labels with shape (n_labels, C), only when `mask` is given.
+    Returns:
+        sp_maps: superpixel maps with size (N, H, W)
+        sp_labels: superpixel labels with size (n_labels, C), only when `mask` is given.
             `n_labels` could be smaller than `n_superpixels` in the case of point supervision,
             where `sp_labels` correspond to labels of the first `n_labels` superpixels.
     """
@@ -49,11 +62,16 @@ def preprocess_superpixels(segments, mask=None):
 
     # stacking normalized superpixel segment maps
     sp_maps = torch.cat(
-        [(segments == idx).unsqueeze(0) for idx in sp_idx_list])
+        [(segments == sp_idx).unsqueeze(0) for sp_idx in sp_idx_list])
     sp_maps = sp_maps.squeeze().float()
     sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
 
-    if mask is None:
+    if adjacency is None or mask is None:
         return sp_maps
 
-    return sp_maps, sp_labels
+    sp_weights = torch.tensor([
+        _compute_superpixel_weight(sp_labels, adjacency, sp_idx)
+        for sp_idx in sp_idx_list
+    ]).to(segments.device)
+
+    return sp_maps, sp_labels, sp_weights
