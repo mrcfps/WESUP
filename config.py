@@ -26,7 +26,7 @@ CHECKPOINT_PERIOD = 10
 
 # Optimization parameters
 MOMENTUM = 0.9
-WEIGHT_DECAY = 0.0005
+WEIGHT_DECAY = 0.001
 
 # Smooth item for numerical stability
 EPSILON = 1e-7
