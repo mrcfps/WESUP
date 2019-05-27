@@ -1,3 +1,7 @@
+"""
+Script for visualizing point annotation.
+"""
+
 import argparse
 import csv
 import os
