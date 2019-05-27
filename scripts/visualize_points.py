@@ -41,7 +41,6 @@ if __name__ == '__main__':
 
         for point in csvreader:
             point = [int(d) for d in point]
-            center = (point[0])
             cv2.circle(img, (point[1], point[0]), args.radius, COLORS[point[2]], -1)
 
         imsave(os.path.join(output_dir, img_name), img)

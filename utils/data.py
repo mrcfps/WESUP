@@ -48,8 +48,13 @@ def _transform_multiple_images(*imgs):
         Recognition, 2003.
         """
 
-        np.random.seed(random_state)
         image = np.array(image)
+
+        # don't apply elastic transformation to point mask
+        if image.sum() / np.prod(image.shape) < 0.5:
+            return Image.fromarray(image)
+
+        np.random.seed(random_state)
         shape = image.shape[:2]
 
         dx = gaussian_filter((np.random.rand(*shape) * 2 - 1),
@@ -80,12 +85,6 @@ def _transform_multiple_images(*imgs):
                     sigma=rnd(20, 50),
                     random_state=np.random.randint(100))
          ),
-        # (1, partial(TF.affine,
-        #             angle=rnd(-20, 20),
-        #             translate=(rnd(-20, 20), rnd(-20, 20)),
-        #             scale=rnd(1, 1.4),
-        #             shear=0)
-        #  ),
         (0.5, TF.hflip),
         (0.5, TF.vflip),
     )
@@ -143,15 +142,13 @@ class SegmentationDataset(Dataset):
         target_height = int(self.rescale_factor * img.height)
         target_width = int(self.rescale_factor * img.width)
 
-        img = img.resize((target_width, target_height),
-                         resample=Image.BILINEAR)
+        img = img.resize((target_width, target_height), resample=Image.BILINEAR)
 
         # pixel-level annotation mask
         mask = None
         if self.mask_paths is not None:
             mask = Image.open(self.mask_paths[idx])
-            mask = mask.resize((target_width, target_height),
-                               resample=Image.NEAREST)
+            mask = mask.resize((target_width, target_height), resample=Image.NEAREST)
 
         # point-level annotation mask
         point_mask = None
@@ -159,11 +156,11 @@ class SegmentationDataset(Dataset):
             with open(self.point_paths[idx]) as fp:
                 points = np.array([[int(d) for d in point]
                                    for point in csv.reader(fp)])
-                points = np.floor(points * self.rescale_factor).astype('int')
+                rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
+                points = np.floor(points * rescaler).astype('int')
 
             # compute point mask
-            point_mask = np.zeros(
-                (target_height, target_width, config.N_CLASSES), dtype='uint8')
+            point_mask = np.zeros((target_height, target_width, config.N_CLASSES), dtype='uint8')
             for i, j, class_ in points:
                 point_vec = np.zeros(config.N_CLASSES)
                 point_vec[class_] = 1
@@ -173,8 +170,7 @@ class SegmentationDataset(Dataset):
         if self.train:
             # perform data augmentation
             img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask, point_mask = _transform_multiple_images(
-                img, mask, point_mask)
+            img, mask, point_mask = _transform_multiple_images(img, mask, point_mask)
 
         segments = slic(
             img,
