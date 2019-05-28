@@ -158,8 +158,7 @@ class SegmentationDataset(Dataset):
         if self.train:
             # perform data augmentation
             img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask, point_mask = _transform_multiple_images(
-                img, mask, point_mask)
+            img, mask, point_mask = _transform_multiple_images(img, mask, point_mask)
 
         segments = slic(
             img,
