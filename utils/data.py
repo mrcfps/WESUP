@@ -11,7 +11,6 @@ from functools import partial
 import numpy as np
 from PIL import Image
 from skimage.segmentation import slic
-from skimage.feature import greycomatrix
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 
@@ -100,17 +99,6 @@ def _transform_multiple_images(*imgs):
     return imgs
 
 
-def _compute_adjaceny_matrix(arr):
-    """Compute adjacency matrix for superpixels using GLCM (Grey-Level Co-occurence Matrix)."""
-
-    glcm = greycomatrix(
-        arr, [1], [0, 0.5 * np.pi, np.pi, 1.5 * np.pi], levels=arr.max() + 1)
-    glcm = glcm.sum(axis=-1)[..., 0]
-    glcm = glcm * (1 - np.eye(glcm.shape[0]))
-
-    return (glcm > 0).astype("uint8")
-
-
 class SegmentationDataset(Dataset):
     """One-shot segmentation dataset."""
 
@@ -139,8 +127,8 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx])
-        target_height = int(self.rescale_factor * img.height)
-        target_width = int(self.rescale_factor * img.width)
+        target_height = int(np.ceil(self.rescale_factor * img.height))
+        target_width = int(np.ceil(self.rescale_factor * img.width))
 
         img = img.resize((target_width, target_height), resample=Image.BILINEAR)
 
@@ -170,18 +158,17 @@ class SegmentationDataset(Dataset):
         if self.train:
             # perform data augmentation
             img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask, point_mask = _transform_multiple_images(img, mask, point_mask)
+            img, mask, point_mask = _transform_multiple_images(
+                img, mask, point_mask)
 
         segments = slic(
             img,
             n_segments=int(img.width * img.height / config.SP_AREA),
             compactness=config.SP_COMPACTNESS,
         )
-        adjacency = _compute_adjaceny_matrix(segments)
 
         img = TF.to_tensor(img)
         segments = torch.LongTensor(segments)
-        adjacency = torch.ByteTensor(adjacency)
 
         if mask is not None:
             mask = np.array(mask)
@@ -200,7 +187,7 @@ class SegmentationDataset(Dataset):
         else:
             point_mask = empty_tensor()
 
-        return img, segments, adjacency, mask, point_mask
+        return img, segments, mask, point_mask
 
     def summary(self):
         """Print summary information."""

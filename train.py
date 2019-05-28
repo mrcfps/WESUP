@@ -16,6 +16,7 @@ import torch.optim as optim
 import config
 from wessup import Wessup
 from utils import record
+from utils import is_empty_tensor
 from utils.semi import label_propagate
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
@@ -66,14 +67,13 @@ def build_cli_parser():
     return parser
 
 
-def cross_entropy(y_hat, y_true, sp_weights=None, class_weights=None):
+def cross_entropy(y_hat, y_true, class_weights=None):
     """Semi-supervised cross entropy loss function.
 
     Args:
         y_hat: prediction tensor with size (N, C), where C is the number of classes
         y_true: label tensor with size (N, C). A sample won't be counted into loss
             if its label is all zeros.
-        sp_weights: superpixel weights tensor with size (N,)
         class_weights: class weights tensor with size (C,)
 
     Returns:
@@ -91,9 +91,6 @@ def cross_entropy(y_hat, y_true, sp_weights=None, class_weights=None):
 
     ce = -y_true * torch.log(y_hat)
 
-    if sp_weights is not None:
-        ce = ce * sp_weights.unsqueeze(1)
-
     if class_weights is not None:
         ce = ce * class_weights.unsqueeze(0)
 
@@ -101,13 +98,15 @@ def cross_entropy(y_hat, y_true, sp_weights=None, class_weights=None):
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    img, segments, adjacency, mask = data
+    img, segments, mask, point_mask = data
 
     img = img.to(device)
     segments = segments.to(device).squeeze()
-    adjacency = adjacency.to(device).squeeze()
     mask = mask.to(device).squeeze()
-    sp_maps, sp_labels, sp_weights = preprocess_superpixels(segments, adjacency, mask)
+    point_mask = point_mask.to(device).squeeze()
+    sp_maps, sp_labels = preprocess_superpixels(
+        segments, mask if is_empty_tensor(point_mask) else point_mask
+    )
 
     optimizer.zero_grad()
     metrics = dict()
@@ -132,14 +131,12 @@ def train_one_iteration(model, optimizer, phase, *data):
                                                 config.PROPAGATE_THRESHOLD)
             metrics['propagated_labels'] = propagated_labels.sum().item()
 
-            loss = ce(sp_pred[:labeled_num], sp_labels,
-                      sp_weights=sp_weights[:labeled_num])
-            propagate_loss = ce(sp_pred[labeled_num:], propagated_labels,
-                                sp_weights=sp_weights[labeled_num])
+            loss = ce(sp_pred[:labeled_num], sp_labels)
+            propagate_loss = ce(sp_pred[labeled_num:], propagated_labels)
             metrics['propagate_loss'] = propagate_loss.item()
             loss += config.PROPAGATE_WEIGHT * propagate_loss
         else:  # fully-supervised mode
-            loss = ce(sp_pred, sp_labels, sp_weights=sp_weights)
+            loss = ce(sp_pred, sp_labels)
 
         metrics['loss'] = loss.item()
         if phase == 'train':
