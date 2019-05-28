@@ -16,7 +16,7 @@ import torch.optim as optim
 import config
 from wessup import Wessup
 from utils import record
-from utils import is_empty_tensor
+from utils import is_empty_tensor, log
 from utils.semi import label_propagate
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
@@ -216,11 +216,9 @@ if __name__ == '__main__':
             weight_decay=config.WEIGHT_DECAY
         )
 
-        print('\nWarmup Stage')
-        print('=' * 20)
+        log('\nWarmup Stage', '=')
         for epoch in range(1, args.warmup + 1):
-            print('\nWarmup epoch {}/{}'.format(epoch, args.warmup))
-            print('-' * 10)
+            log('\nWarmup epoch {}/{}'.format(epoch, args.warmup), '-')
             train_one_epoch(wessup, optimizer, warmup=True)
 
     if args.resume_ckpt is not None:
@@ -249,12 +247,10 @@ if __name__ == '__main__':
                                                          factor=0.5, min_lr=1e-7,
                                                          verbose=True)
 
-    print('\nTraining Stage')
-    print('=' * 20)
+    log('\nTraining Stage', '=')
 
     for epoch in range(initial_epoch, total_epochs + 1):
-        print('\nEpoch {}/{}'.format(epoch, total_epochs))
-        print('-' * 10)
+        log('\nEpoch {}/{}'.format(epoch, total_epochs), '-')
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
         train_one_epoch(wessup, optimizer)

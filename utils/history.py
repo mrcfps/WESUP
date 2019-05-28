@@ -64,7 +64,7 @@ class HistoryTracker:
         """
 
         df = pd.read_csv(self.save_path)
-        print('Training Summary')
+        print('\nTraining Summary')
         print('=' * 20)
 
         for key in df.keys():
