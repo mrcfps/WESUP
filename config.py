@@ -9,7 +9,7 @@ RESCALE_FACTOR = 0.5
 N_CLASSES = 2
 
 # Class weights for cross-entropy loss function
-CLASS_WEIGHTS = (2, 1)
+CLASS_WEIGHTS = (3, 1)
 
 # Threshold of similarity for label propagation
 PROPAGATE_THRESHOLD = 0.9
@@ -26,7 +26,7 @@ CHECKPOINT_PERIOD = 10
 
 # Optimization parameters
 MOMENTUM = 0.9
-WEIGHT_DECAY = 0.0005
+WEIGHT_DECAY = 0.001
 
 # Smooth item for numerical stability
 EPSILON = 1e-7

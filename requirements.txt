@@ -4,6 +4,7 @@ pandas
 matplotlib
 
 scikit-image
+opencv-python
 Pillow
 
 torch

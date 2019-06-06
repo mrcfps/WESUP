@@ -1,9 +1,11 @@
+"""
+Script for generating point annotation.
+"""
+
 import argparse
 import csv
 import os
-import random
 import sys
-from shutil import copytree
 
 import numpy as np
 from tqdm import tqdm
@@ -11,12 +13,11 @@ from PIL import Image
 from skimage.measure import label
 
 
-def _sample_within_region(region_mask, class_label,
-                          num_samples=1, center_only=False):
+def _sample_within_region(region_mask, class_label, num_samples=1):
 
     xs, ys = np.where(region_mask)
 
-    if center_only and num_samples == 1:
+    if num_samples == 1:
         x_center, y_center = int(xs.mean().round()), int(ys.mean().round())
 
         # if the center point is inside the region, return it
@@ -36,7 +37,6 @@ def _generate_points(mask, label_percent=1e-4):
     # (from 0 to n_classes, where 0 is background)
     for class_label in np.unique(mask):
         class_mask = mask == class_label
-        class_mask = mask == class_label
         if class_label == 0:
             # if background, randomly sample some points
             points.append(
@@ -50,13 +50,13 @@ def _generate_points(mask, label_percent=1e-4):
             region_indexes = np.unique(class_mask)
             region_indexes = region_indexes[np.nonzero(region_indexes)]
 
+            # iterate over all instances of this class
             for idx in np.unique(region_indexes):
                 region_mask = class_mask == idx
-                num_samples = int(region_mask.sum() * label_percent)
+                num_samples = max(1, int(region_mask.sum() * label_percent))
                 points.append(
                     _sample_within_region(
-                        region_mask, class_label,
-                        num_samples=num_samples, center_only=(num_samples == 1)
+                        region_mask, class_label, num_samples=num_samples
                     )
                 )
 
@@ -76,12 +76,12 @@ if __name__ == '__main__':
         print('Cannot generate dot annotation without masks.')
         sys.exit(1)
 
-    label_dir = os.path.join(args.root_dir, 'labels')
+    label_dir = os.path.join(args.root_dir, 'points')
 
     if not os.path.exists(label_dir):
         os.mkdir(label_dir)
 
-    print('Generate labels with dot annotation ...')
+    print('Generating point annotation ...')
     for fname in tqdm(os.listdir(mask_dir)):
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(os.path.join(mask_dir, fname)))
