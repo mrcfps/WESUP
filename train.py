@@ -5,7 +5,6 @@ Training module.
 import argparse
 import os
 import warnings
-from functools import partial
 
 import numpy as np
 from tqdm import tqdm
@@ -14,10 +13,9 @@ import torch
 import torch.optim as optim
 
 import config
-from wessup import Wessup
+from models import Wessup
 from utils import record
 from utils import is_empty_tensor, log
-from utils.semi import label_propagate
 from utils.data import get_trainval_dataloaders
 from utils.metrics import accuracy
 from utils.metrics import dice
@@ -67,36 +65,6 @@ def build_cli_parser():
     return parser
 
 
-def cross_entropy(y_hat, y_true, class_weights=None):
-    """Semi-supervised cross entropy loss function.
-
-    Args:
-        y_hat: prediction tensor with size (N, C), where C is the number of classes
-        y_true: label tensor with size (N, C). A sample won't be counted into loss
-            if its label is all zeros.
-        class_weights: class weights tensor with size (C,)
-
-    Returns:
-        cross_entropy: cross entropy loss computed only on samples with labels
-    """
-
-    # clamp all elements to prevent numerical overflow/underflow
-    y_hat = torch.clamp(y_hat, min=config.EPSILON, max=(1 - config.EPSILON))
-
-    # number of samples with labels
-    labeled_samples = torch.sum(y_true.sum(dim=1) > 0).float()
-
-    if labeled_samples.item() == 0:
-        return torch.tensor(0.)
-
-    ce = -y_true * torch.log(y_hat)
-
-    if class_weights is not None:
-        ce = ce * class_weights.unsqueeze(0)
-
-    return torch.sum(ce) / labeled_samples
-
-
 def train_one_iteration(model, optimizer, phase, *data):
     img, segments, mask, point_mask = data
 
@@ -111,33 +79,9 @@ def train_one_iteration(model, optimizer, phase, *data):
     optimizer.zero_grad()
     metrics = dict()
 
-    # weighted cross entropy
-    ce = partial(cross_entropy,
-                 class_weights=torch.Tensor(config.CLASS_WEIGHTS).to(device))
-
     with torch.set_grad_enabled(phase == 'train'):
         sp_pred = model(img, sp_maps)
-
-        # total number of superpixels
-        total_num = sp_pred.size(0)
-
-        # number of labeled superpixels
-        labeled_num = sp_labels.size(0)
-
-        if labeled_num < total_num:
-            # weakly-supervised mode
-            metrics['labeled_sp_ratio'] = labeled_num / total_num
-            propagated_labels = label_propagate(model.clf_input_features, sp_labels,
-                                                config.PROPAGATE_THRESHOLD)
-            metrics['propagated_labels'] = propagated_labels.sum().item()
-
-            loss = ce(sp_pred[:labeled_num], sp_labels)
-            propagate_loss = ce(sp_pred[labeled_num:], propagated_labels)
-            metrics['propagate_loss'] = propagate_loss.item()
-            loss += config.PROPAGATE_WEIGHT * propagate_loss
-        else:  # fully-supervised mode
-            loss = ce(sp_pred, sp_labels)
-
+        loss = model.compute_loss(sp_pred, sp_labels)
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()
