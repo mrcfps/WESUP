@@ -14,7 +14,6 @@ import torch
 from torch.utils.data import DataLoader
 
 import numpy as np
-import pydensecrf.densecrf as dcrf
 from tqdm import tqdm
 from PIL import Image
 from skimage.transform import resize
@@ -90,35 +89,7 @@ def predict(model, dataloader):
     return predictions
 
 
-def crf_postprocess(img, pred_mask):
-    """Post-processing using dense CRF.
-
-    Arguments:
-        img: original PIL image
-        pred_mask: prediction mask array with shape (H, W, n_classes)
-
-    Returns
-    """
-
-    h, w = pred_mask.shape[0], pred_mask.shape[1]
-    img = np.array(img.resize((w, h), resample=Image.BILINEAR))
-    d = dcrf.DenseCRF2D(w, h, 2)
-
-    U = -np.log(pred_mask).transpose(2, 0, 1).reshape((2, -1))
-    U = np.ascontiguousarray(U)
-    img = np.ascontiguousarray(img)
-
-    d.setUnaryEnergy(U)
-    d.addPairwiseGaussian(sxy=1, compat=10)
-    d.addPairwiseBilateral(sxy=10, srgb=10, rgbim=img, compat=10)
-
-    Q = d.inference(5)
-    Q = np.argmax(np.array(Q), axis=0).reshape((h, w))
-
-    return Q
-
-
-def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=4):
+def infer(model, data_dir, viz_dir=None, epoch=None, num_workers=4):
     """Making inference on a directory of images
 
     Arguments:
@@ -126,12 +97,12 @@ def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=
         data_dir: path to dataset, which should contains at least a subdirectory `images`
             with all images to be predicted
         viz_dir: path to store visualization and metrics results
-        use_crf: whether to apply CRF post-processing
         epoch: current training epoch
         num_workers: number of workers to load data
     """
 
-    dataset = SegmentationDataset(data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
+    dataset = SegmentationDataset(
+        data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
 
     print(f'Predicting {len(dataset)} images ...')
@@ -151,14 +122,11 @@ def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=
     for idx, pred_mask in tqdm(enumerate(predictions), total=len(predictions)):
         orig_img = Image.open(dataset.img_paths[idx])
         pred_mask = pred_mask.cpu().numpy()
-
-        if use_crf:
-            pred_mask = crf_postprocess(orig_img, pred_mask)
-        else:
-            pred_mask = pred_mask.argmax(axis=-1)
+        pred_mask = pred_mask.argmax(axis=-1)
 
         # resize mask to match the size of original image
-        pred_mask = resize(pred_mask, (orig_img.height, orig_img.width), order=0, preserve_range=True)
+        pred_mask = resize(pred_mask, (orig_img.height,
+                                       orig_img.width), order=0, preserve_range=True)
         pred_mask = pred_mask.astype('uint8')
 
         if evaluate:
@@ -172,7 +140,8 @@ def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=
         if viz_dir is not None:
             img_name = os.path.basename(dataset.img_paths[idx])
             extname = os.path.splitext(img_name)[-1]
-            pred_name = img_name.replace(extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
+            pred_name = img_name.replace(
+                extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
 
             # save original image
             orig_img.save(os.path.join(viz_dir, img_name))
@@ -216,8 +185,10 @@ def infer(model, data_dir, viz_dir=None, use_crf=False, epoch=None, num_workers=
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-c', '--checkpoint', required=True, help='Path to checkpoint')
-    parser.add_argument('--wessup-module', help='Path to wessup module (.py file)')
+    parser.add_argument('-c', '--checkpoint', required=True,
+                        help='Path to checkpoint')
+    parser.add_argument('--wessup-module',
+                        help='Path to wessup module (.py file)')
     parser.add_argument('--no-gpu', action='store_true', default=False,
                         help='Whether to avoid using gpu')
     parser.add_argument('-o', '--output',
@@ -231,7 +202,8 @@ if __name__ == '__main__':
 
     wessup_module = args.wessup_module
     if wessup_module is None:
-        wessup_module = os.path.join(args.checkpoint, '..', '..', 'source', 'wessup.py')
+        wessup_module = os.path.join(
+            args.checkpoint, '..', '..', 'source', 'wessup.py')
         wessup_module = os.path.abspath(wessup_module)
     copyfile(wessup_module, 'wessup_ckpt.py')
 
@@ -242,6 +214,7 @@ if __name__ == '__main__':
         model = model.to(device)
         model.load_state_dict(ckpt['model_state_dict'])
         print(f'Loaded checkpoint from {args.checkpoint}.')
-        infer(model, args.dataset_path, args.output, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, args.dataset_path, args.output,
+              epoch=ckpt['epoch'], num_workers=args.jobs)
     finally:
         os.remove('wessup_ckpt.py')
