@@ -17,7 +17,7 @@ import config
 from models import Wessup
 from models import CDWS
 from utils import record
-from utils import is_empty_tensor, log
+from utils import log
 from utils.history import HistoryTracker
 from utils.data import get_trainval_dataloaders
 
@@ -171,9 +171,7 @@ def fit(args):
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
         train_one_epoch(model, optimizer)
-
-        if not args.no_lr_decay:
-            scheduler.step(np.mean(tracker.history['val_dice']))
+        scheduler.step(np.mean(tracker.history['val_dice']))
 
         # save metrics to csv file
         tracker.save()

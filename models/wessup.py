@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from functools import partial
+from skimage.segmentation import slic
 
 import torch
 import torch.nn as nn
@@ -228,13 +229,26 @@ class Wessup(BaseModel):
         return y_u
 
     def preprocess(self, *data):
-        img, segments, pixel_mask, point_mask = data
+        if self.training:
+            img, pixel_mask, point_mask = data
+        else:
+            img, pixel_mask = data
+            point_mask = empty_tensor()
 
-        segments = segments.squeeze().unsqueeze(-1)
+        segments = slic(
+            img.squeeze().cpu().numpy().transpose(1, 2, 0),
+            n_segments=int(img.size(-2) * img.size(-1) / config.SP_AREA),
+            compactness=config.SP_COMPACTNESS,
+        )
+        segments = torch.LongTensor(segments).to(img.device).unsqueeze(-1)
+
         pixel_mask = pixel_mask.squeeze()
-        point_mask = point_mask.squeeze()
 
-        mask = pixel_mask if is_empty_tensor(point_mask) else point_mask
+        if not is_empty_tensor(point_mask):
+            point_mask = point_mask.squeeze()
+            mask = point_mask
+        else:
+            mask = pixel_mask
 
         # ordering of superpixels
         sp_idx_list = range(segments.max() + 1)

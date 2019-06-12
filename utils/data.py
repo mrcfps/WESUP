@@ -11,7 +11,6 @@ from functools import partial
 import numpy as np
 import pandas as pd
 from PIL import Image
-from skimage.segmentation import slic
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 
@@ -242,14 +241,7 @@ class PointSupervisionDataset(SegmentationDataset):
             img = ColorJitter(0.3, 0.3, 0.3)(img)
             img, pixel_mask, point_mask = _transform_multiple_images(img, pixel_mask, point_mask)
 
-        segments = slic(
-            img,
-            n_segments=int(img.width * img.height / config.SP_AREA),
-            compactness=config.SP_COMPACTNESS,
-        )
-
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
-        segments = torch.LongTensor(segments)
 
         if point_mask is not None:
             point_mask = np.array(point_mask, dtype="int64")
@@ -257,7 +249,7 @@ class PointSupervisionDataset(SegmentationDataset):
         else:
             point_mask = empty_tensor()
 
-        return img, segments, pixel_mask, point_mask
+        return img, pixel_mask, point_mask
 
 
 def get_trainval_dataloaders(root_dir, mode=None, point_ratio=None, num_workers=4):
