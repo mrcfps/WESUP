@@ -3,12 +3,13 @@ Data loading utilities.
 """
 
 import csv
-import os
+import os.path as osp
 import glob
 import random
 from functools import partial
 
 import numpy as np
+import pandas as pd
 from PIL import Image
 from skimage.segmentation import slic
 from scipy.ndimage.interpolation import map_coordinates
@@ -28,7 +29,7 @@ def _list_images(path):
 
     images = []
     for ext in ("jpg", "jpeg", "png", "bmp"):
-        images.extend(glob.glob(os.path.join(path, f"*.{ext}")))
+        images.extend(glob.glob(osp.join(path, f"*.{ext}")))
     return sorted(images)
 
 
@@ -100,23 +101,18 @@ def _transform_multiple_images(*imgs):
 
 
 class SegmentationDataset(Dataset):
-    """One-shot segmentation dataset."""
+    """Dataset for segmentation task."""
 
-    def __init__(self, root_dir, rescale_factor=0.5, train=True):
+    def __init__(self, root_dir, mode=None, rescale_factor=0.5, train=True):
         # path to original images
-        self.img_paths = _list_images(os.path.join(root_dir, "images"))
+        self.img_paths = _list_images(osp.join(root_dir, "images"))
 
-        # path to mask annotations
+        # path to mask annotations (optional)
         self.mask_paths = None
-        if os.path.exists(os.path.join(root_dir, "masks")):
-            self.mask_paths = _list_images(os.path.join(root_dir, "masks"))
+        if osp.exists(osp.join(root_dir, "masks")):
+            self.mask_paths = _list_images(osp.join(root_dir, "masks"))
 
-        # path to point annotations
-        self.point_paths = None
-        if os.path.exists(os.path.join(root_dir, "points")):
-            self.point_paths = sorted(
-                glob.glob(os.path.join(root_dir, "points", "*.csv")))
-
+        self.mode = mode or 'mask' if self.mask_paths is not None else None
         self.rescale_factor = rescale_factor
         self.train = train
 
@@ -125,7 +121,7 @@ class SegmentationDataset(Dataset):
     def __len__(self):
         return len(self.img_paths)
 
-    def __getitem__(self, idx):
+    def _read_image_and_mask(self, idx):
         img = Image.open(self.img_paths[idx])
         target_height = int(np.ceil(self.rescale_factor * img.height))
         target_width = int(np.ceil(self.rescale_factor * img.width))
@@ -138,37 +134,10 @@ class SegmentationDataset(Dataset):
             mask = Image.open(self.mask_paths[idx])
             mask = mask.resize((target_width, target_height), resample=Image.NEAREST)
 
-        # point-level annotation mask
-        point_mask = None
-        if self.point_paths is not None:
-            with open(self.point_paths[idx]) as fp:
-                points = np.array([[int(d) for d in point]
-                                   for point in csv.reader(fp)])
-                rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
-                points = np.floor(points * rescaler).astype('int')
+        return img, mask
 
-            # compute point mask
-            point_mask = np.zeros((target_height, target_width, config.N_CLASSES), dtype='uint8')
-            for i, j, class_ in points:
-                point_vec = np.zeros(config.N_CLASSES)
-                point_vec[class_] = 1
-                point_mask[i, j] = point_vec
-            point_mask = Image.fromarray(point_mask)
-
-        if self.train:
-            # perform data augmentation
-            img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask, point_mask = _transform_multiple_images(img, mask, point_mask)
-
-        segments = slic(
-            img,
-            n_segments=int(img.width * img.height / config.SP_AREA),
-            compactness=config.SP_COMPACTNESS,
-        )
-
+    def _convert_image_and_mask_to_tensor(self, img, mask):
         img = TF.to_tensor(img)
-        segments = torch.LongTensor(segments)
-
         if mask is not None:
             mask = np.array(mask)
             mask = np.concatenate(
@@ -180,42 +149,150 @@ class SegmentationDataset(Dataset):
         else:
             mask = empty_tensor()
 
+        return img, mask
+
+    def __getitem__(self, idx):
+        img, mask = self._read_image_and_mask(idx)
+
+        if self.train:
+            # perform data augmentation
+            img = ColorJitter(0.3, 0.3, 0.3)(img)
+            img, mask = _transform_multiple_images(img, mask)
+
+        img, mask = self._convert_image_and_mask_to_tensor(img, mask)
+
+        return img, mask
+
+    def summary(self):
+        """Print summary information."""
+
+        print(
+            f"Segmentation dataset ({'training' if self.train else 'inference'}) "
+            f"initialized with {len(self.img_paths)} images.")
+
+        if self.mode is not None:
+            print(f"Supervision mode: {self.mode}")
+        else:
+            print("No supervision provided.")
+
+
+class AreaConstraintDataset(SegmentationDataset):
+    """Segmentation dataset with area information."""
+
+    def __init__(self, root_dir, rescale_factor=0.5, train=True):
+        super().__init__(root_dir, 'area', rescale_factor, train)
+
+        # area information (# foreground pixels divided by total pixels, between 0 and 1)
+        self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
+                                     usecols=['img', 'area'])
+
+    def __getitem__(self, idx):
+        img, mask = self._read_image_and_mask(idx)
+
+        if self.train:
+            # perform data augmentation
+            img = ColorJitter(0.3, 0.3, 0.3)(img)
+            img, mask = _transform_multiple_images(img, mask)
+
+        img = TF.to_tensor(img)
+        mask = torch.LongTensor(np.array(mask))
+        area = torch.tensor(self.area_info.loc[idx]['area'])
+
+        return img, mask, area
+
+
+class PointSupervisionDataset(SegmentationDataset):
+    """One-shot segmentation dataset."""
+
+    def __init__(self, root_dir, point_ratio, rescale_factor=0.5, train=True):
+        super().__init__(root_dir, 'point', rescale_factor, train)
+
+        # path to point supervision directory
+        self.point_root = osp.join(root_dir, f'points-{point_ratio}')
+
+        if not osp.exists(self.point_root):
+            raise Exception(
+                f'Point supervision with ratio {point_ratio} does not exist. '
+                f'Run scripts/generate_points.py to generate.'
+            )
+
+        # path to point annotation files
+        self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
+
+    def __getitem__(self, idx):
+        img, pixel_mask = self._read_image_and_mask(idx)
+
+        point_mask = None
+        if self.point_paths is not None:
+            with open(self.point_paths[idx]) as fp:
+                points = np.array([[int(d) for d in point]
+                                   for point in csv.reader(fp)])
+                rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
+                points = np.floor(points * rescaler).astype('int')
+
+            # compute point mask
+            point_mask = np.zeros((img.height, img.width, config.N_CLASSES), dtype='uint8')
+            for i, j, class_ in points:
+                point_vec = np.zeros(config.N_CLASSES)
+                point_vec[class_] = 1
+                point_mask[i, j] = point_vec
+            point_mask = Image.fromarray(point_mask)
+
+        if self.train:
+            img = ColorJitter(0.3, 0.3, 0.3)(img)
+            img, pixel_mask, point_mask = _transform_multiple_images(img, pixel_mask, point_mask)
+
+        segments = slic(
+            img,
+            n_segments=int(img.width * img.height / config.SP_AREA),
+            compactness=config.SP_COMPACTNESS,
+        )
+
+        img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
+        segments = torch.LongTensor(segments)
+
         if point_mask is not None:
             point_mask = np.array(point_mask, dtype="int64")
             point_mask = torch.LongTensor(point_mask)
         else:
             point_mask = empty_tensor()
 
-        return img, segments, mask, point_mask
-
-    def summary(self):
-        """Print summary information."""
-
-        mode = "training" if self.train else "inference"
-        print(
-            f"Segmentation dataset ({mode}) initialized with {len(self.img_paths)} images.")
-
-        if self.point_paths is not None:
-            print("Supervision mode: point-level")
-        elif self.mask_paths is not None:
-            print("Supervision mode: pixel-level")
-        else:
-            print("No supervision provided.")
+        return img, segments, pixel_mask, point_mask
 
 
-def get_trainval_dataloaders(root_dir, num_workers):
-    """Returns training and validation dataloaders."""
+def get_trainval_dataloaders(root_dir, mode=None, point_ratio=None, num_workers=4):
+    """Returns training and validation dataloaders.
 
-    datasets = {
-        "train": SegmentationDataset(
-            os.path.join(root_dir, "train"), rescale_factor=config.RESCALE_FACTOR
-        ),
-        "val": SegmentationDataset(
-            os.path.join(root_dir, "val"),
-            rescale_factor=config.RESCALE_FACTOR,
-            train=False,
-        ),
-    }
+    Args:
+        root_dir: path to dataset root
+        mode: supervision mode (one of "mask", "point" or "area")
+        point_ratio: supervised point ratio (only relevant when `mode` is set to "point")
+        num_workers: number of workers for dataloaders
+
+    Returns:
+        dataloaders: a dict with two keys "train" and "val" with their respective
+            datasets as values
+    """
+
+    datasets = {}
+
+    train_dir = osp.join(root_dir, "train")
+    if mode == 'point':
+        datasets['train'] = PointSupervisionDataset(train_dir,
+                                                    point_ratio,
+                                                    rescale_factor=config.RESCALE_FACTOR)
+    elif mode == 'area':
+        datasets['train'] = AreaConstraintDataset(train_dir,
+                                                  rescale_factor=config.RESCALE_FACTOR)
+    elif mode == 'mask':
+        datasets['train'] = SegmentationDataset(train_dir, mode='mask',
+                                                rescale_factor=config.RESCALE_FACTOR)
+
+    datasets["val"] = SegmentationDataset(
+        osp.join(root_dir, "val"),
+        rescale_factor=config.RESCALE_FACTOR,
+        train=False,
+    )
 
     dataloaders = {
         "train": DataLoader(

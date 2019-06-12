@@ -5,6 +5,7 @@ Training module.
 import argparse
 import os
 import warnings
+from shutil import rmtree
 
 import numpy as np
 from tqdm import tqdm
@@ -14,17 +15,11 @@ import torch.optim as optim
 
 import config
 from models import Wessup
+from models import CDWS
 from utils import record
 from utils import is_empty_tensor, log
-from utils.data import get_trainval_dataloaders
-from utils.metrics import accuracy
-from utils.metrics import dice
-from utils.metrics import detection_f1
-from utils.metrics import object_dice
-from utils.metrics import object_hausdorff
 from utils.history import HistoryTracker
-from utils.preprocessing import preprocess_superpixels
-from infer import compute_mask_with_superpixel_prediction
+from utils.data import get_trainval_dataloaders
 
 warnings.filterwarnings('ignore')
 
@@ -46,8 +41,12 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('--no-lr-decay', action='store_true', default=False,
-                        help='Whether to disable automatic learning rate decay')
+    parser.add_argument('--model', default='wessup', choices=['wessup', 'cdws'],
+                        help='Which model to use')
+    parser.add_argument('--mode', default='point', choices=['point', 'area', 'mask'],
+                        help='Supervision mode')
+    parser.add_argument('-p', '--point-ratio', type=float, default=5e-5,
+                        help='Ratio of annotated points and total pixels')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-w', '--warmup', type=int, default=0,
@@ -60,46 +59,29 @@ def build_cli_parser():
                         help='Path to previous checkpoint for resuming training')
     parser.add_argument('--lr', type=float, default=0.001,
                         help='Learning rate for optimizer')
-    parser.add_argument('-m', '--message', help='Note on this experiment')
+    parser.add_argument('--message', help='Note on this experiment')
+    parser.add_argument('--smoke', action='store_true', default=False,
+                        help='Whether this is a smoke test')
 
     return parser
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    img, segments, mask, point_mask = data
-
-    img = img.to(device)
-    segments = segments.to(device).squeeze()
-    mask = mask.to(device).squeeze()
-    point_mask = point_mask.to(device).squeeze()
-    sp_maps, sp_labels = preprocess_superpixels(
-        segments, mask if is_empty_tensor(point_mask) else point_mask
-    )
+    data = [datum.to(device) for datum in data]
+    input_, target = model.preprocess(*data)
 
     optimizer.zero_grad()
     metrics = dict()
 
     with torch.set_grad_enabled(phase == 'train'):
-        sp_pred = model(img, sp_maps)
-        loss = model.compute_loss(sp_pred, sp_labels)
+        pred = model(input_)
+        loss = model.compute_loss(pred, target)
         metrics['loss'] = loss.item()
         if phase == 'train':
             loss.backward()
             optimizer.step()
 
-    mask = mask.argmax(dim=-1)
-    pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
-    pred_mask = pred_mask.argmax(dim=-1)
-    metrics['pixel_acc'] = accuracy(pred_mask, mask)
-    metrics['dice'] = dice(pred_mask, mask)
-
-    # calculate object-level metrics in validation phase
-    if phase == 'val':
-        metrics['detection_f1'] = detection_f1(pred_mask, mask)
-        metrics['object_dice'] = object_dice(pred_mask, mask)
-        metrics['object_hausdorff'] = object_hausdorff(pred_mask, mask)
-
-    tracker.step(metrics)
+    tracker.step({**metrics, **model.evaluate(pred, target)})
 
 
 def train_one_epoch(model, optimizer, warmup=False):
@@ -125,36 +107,27 @@ def train_one_epoch(model, optimizer, warmup=False):
         pbar.close()
 
 
-if __name__ == '__main__':
-    parser = build_cli_parser()
-    args = parser.parse_args()
-
-    device = args.device
-    dataloaders = get_trainval_dataloaders(args.dataset_path, args.jobs)
-
+def fit(args):
+    ############################# MODEL #############################
+    checkpoint = None
     if args.resume_ckpt is not None:
-        record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
+        print(f'Loading checkpoints from {args.resume_ckpt}.')
         checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
-        # load previous model states
-        backbone = checkpoint['backbone']
-        wessup = Wessup(backbone)
-        wessup.load_state_dict(checkpoint['model_state_dict'])
-    else:  # train a new model
-        record_dir = record.prepare_record_dir()
-        record.copy_source_files(record_dir)
+    if args.model == 'wessup':
+        model = Wessup(args.backbone, checkpoint=checkpoint)
+    elif args.model == 'cdws':
+        model = CDWS(checkpoint=checkpoint)
+    else:
+        raise ValueError(f'Unsupported model: {args.model}')
 
-        # create new model
-        wessup = Wessup(args.backbone)
+    model = model.to(device)
 
-    wessup.to(device)
-    tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
-    record.save_params(record_dir, args)
-
-    if args.warmup > 0:
+    ############################# WARMUP #############################
+    if args.warmup > 0 and args.model == 'wessup':
         # only optimize classifier of wessup
         optimizer = optim.SGD(
-            wessup.classifier.parameters(),
+            model.classifier.parameters(),
             lr=0.005,
             momentum=config.MOMENTUM,
             weight_decay=config.WEIGHT_DECAY
@@ -163,12 +136,13 @@ if __name__ == '__main__':
         log('\nWarmup Stage', '=')
         for epoch in range(1, args.warmup + 1):
             log('\nWarmup epoch {}/{}'.format(epoch, args.warmup), '-')
-            train_one_epoch(wessup, optimizer, warmup=True)
+            train_one_epoch(model, optimizer, warmup=True)
 
-    if args.resume_ckpt is not None:
+    ############################ OPTIMIZER ############################
+    if checkpoint is not None:
         # load previous optimizer states and set learning rate to given value
         optimizer = optim.SGD(
-            wessup.parameters(),
+            model.parameters(),
             lr=args.lr
         )
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -177,27 +151,26 @@ if __name__ == '__main__':
         initial_epoch = checkpoint['epoch'] + 1
     else:
         optimizer = optim.SGD(
-            wessup.parameters(),
+            model.parameters(),
             lr=args.lr,
             momentum=config.MOMENTUM,
             weight_decay=config.WEIGHT_DECAY
         )
         initial_epoch = 1
 
-    total_epochs = args.epochs + initial_epoch - 1
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
+                                                     factor=0.5, min_lr=1e-7,
+                                                     verbose=True)
 
-    if not args.no_lr_decay:
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                         factor=0.5, min_lr=1e-7,
-                                                         verbose=True)
-
+    ############################# TRAIN #############################
     log('\nTraining Stage', '=')
+    total_epochs = args.epochs + initial_epoch - 1
 
     for epoch in range(initial_epoch, total_epochs + 1):
         log('\nEpoch {}/{}'.format(epoch, total_epochs), '-')
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
-        train_one_epoch(wessup, optimizer)
+        train_one_epoch(model, optimizer)
 
         if not args.no_lr_decay:
             scheduler.step(np.mean(tracker.history['val_dice']))
@@ -212,12 +185,35 @@ if __name__ == '__main__':
             # save checkpoints for resuming training
             ckpt_path = os.path.join(
                 record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
-            torch.save({
-                'epoch': epoch,
-                'backbone': wessup.backbone_name,
-                'model_state_dict': wessup.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }, ckpt_path)
-            print(f'Save checkpoint to {ckpt_path}.')
+            model.save_checkpoint(ckpt_path, epoch=epoch,
+                                  optimizer_state_dict=optimizer.state_dict())
 
     tracker.report()
+
+
+if __name__ == '__main__':
+    parser = build_cli_parser()
+    args = parser.parse_args()
+
+    device = args.device
+    dataloaders = get_trainval_dataloaders(
+        args.dataset_path, mode=args.mode,
+        point_ratio=args.point_ratio, num_workers=args.jobs)
+
+    if args.resume_ckpt is not None:
+        record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
+    else:
+        record_dir = record.prepare_record_dir()
+        record.copy_source_files(record_dir)
+
+    tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
+    record.save_params(record_dir, args)
+
+    try:
+        fit(args)
+    except:
+        rmtree(record_dir, ignore_errors=True)
+        raise
+    finally:
+        if args.smoke:
+            rmtree(record_dir, ignore_errors=True)

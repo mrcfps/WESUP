@@ -1,6 +1,5 @@
-import sys
-import os.path as osp
 from abc import ABC, abstractmethod
+
 from functools import partial
 
 import torch
@@ -8,9 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 
-sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
-
 import config
+from utils import empty_tensor
+from utils import is_empty_tensor
+from .base import BaseModel
 
 
 class BaseExtractor(ABC):
@@ -117,17 +117,25 @@ class DenseNetExtractor(BaseExtractor):
         return layers
 
 
-class Wessup(nn.Module):
-    def __init__(self, backbone_name):
+class Wessup(BaseModel):
+    """WEakly Spervised SUPerpixels."""
+
+    def __init__(self, backbone_name='vgg16', checkpoint=None):
         """Initialize a Wessup model.
 
         Arguments:
             backbone_name: a string representing the CNN backbone, such as `vgg13` and
                 `resnet50` (currently only VGG, ResNet and DenseNet are supported)
+            checkpoint: a checkpoint dictionary containing necessary data.
         """
 
         super().__init__()
-        self.backbone_name = backbone_name
+
+        if checkpoint is not None:
+            self.backbone_name = checkpoint['backbone']
+        else:
+            self.backbone_name = backbone_name
+
         try:
             self.backbone = models.__dict__[backbone_name](pretrained=True)
         except KeyError:
@@ -165,6 +173,12 @@ class Wessup(nn.Module):
         # label propagation input features
         self.clf_input_features = None
         self.fc_layers.register_forward_hook(self._hook_fn)
+
+        # superpixel predictions (internally tracked to compute loss)
+        self._sp_pred = None
+
+        if checkpoint is not None:
+            self.load_state_dict(checkpoint['model_state_dict'])
 
         self.summary()
 
@@ -213,16 +227,61 @@ class Wessup(nn.Module):
 
         return y_u
 
-    def forward(self, x, sp_maps):
+    def preprocess(self, *data):
+        img, segments, pixel_mask, point_mask = data
+
+        segments = segments.squeeze().unsqueeze(-1)
+        pixel_mask = pixel_mask.squeeze()
+        point_mask = point_mask.squeeze()
+
+        mask = pixel_mask if is_empty_tensor(point_mask) else point_mask
+
+        # ordering of superpixels
+        sp_idx_list = range(segments.max() + 1)
+
+        def compute_superpixel_label(mask, segments, sp_idx):
+            sp_mask = (mask * (segments == sp_idx).long()).float()
+            return sp_mask.sum(dim=(0, 1)) / (sp_mask.sum() + config.EPSILON)
+
+        if not is_empty_tensor(mask):
+            # compute labels for each superpixel
+            sp_labels = torch.cat([
+                compute_superpixel_label(mask, segments, sp_idx).unsqueeze(0)
+                for sp_idx in range(segments.max() + 1)
+            ])
+
+            # move labeled superpixels to the front of `sp_idx_list`
+            labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().squeeze()
+            unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero().squeeze()
+            sp_idx_list = torch.cat([labeled_sps, unlabeled_sps])
+
+            # quantize superpixel labels (e.g., from (0.7, 0.3) to (1.0, 0.0))
+            sp_labels = sp_labels[labeled_sps]
+            sp_labels = (sp_labels == sp_labels.max(dim=-1, keepdim=True)[0]).float()
+        else:  # no supervision provided
+            sp_labels = empty_tensor().to(img.device)
+
+        # stacking normalized superpixel segment maps
+        sp_maps = torch.cat(
+            [(segments == sp_idx).unsqueeze(0) for sp_idx in sp_idx_list])
+        sp_maps = sp_maps.squeeze().float()
+        sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
+
+        return (img, sp_maps), (pixel_mask, sp_labels)
+
+    def forward(self, x):
         """Running a forward pass.
 
         Args:
-            x: input tensor of size (B, C, H, W)
-            sp_maps: stacked superpixel maps with size (N, H, W)
+            x: a tuple containing input tensor of size (B, C, H, W) and
+                stacked superpixel maps with size (N, H, W)
 
         Returns:
-            sp_pred: superpixel prediction with size (N, 2)
+            pred: prediction with size (H, W)
         """
+
+        x, sp_maps = x
+        n_superpixels, height, width = sp_maps.size()
 
         # extract conv feature maps and flatten
         x = self.extractor.extract(x)
@@ -236,14 +295,29 @@ class Wessup(nn.Module):
         x = self.fc_layers(x)
 
         # classify each superpixel
-        sp_pred = self.classifier(x)
+        self._sp_pred = self.classifier(x)
 
-        return sp_pred
+        # flatten sp_maps to one channel
+        sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)
 
-    def compute_loss(self, sp_pred, sp_labels, metrics=None):
-        device = sp_pred.device
+        # initialize prediction mask
+        pred = torch.zeros(height, width, self._sp_pred.size(1))
+        pred = pred.to(sp_maps.device)
+
+        for sp_idx in range(sp_maps.max().item() + 1):
+            pred[sp_maps == sp_idx] = self._sp_pred[sp_idx]
+
+        return pred
+
+    def compute_loss(self, pred, target, metrics=None):
+        device = pred.device
+        _, sp_labels = target
+
+        if self._sp_pred is None:
+            raise RuntimeError('You must run a forward pass before computing loss.')
+
         # total number of superpixels
-        total_num = sp_pred.size(0)
+        total_num = self._sp_pred.size(0)
 
         # number of labeled superpixels
         labeled_num = sp_labels.size(0)
@@ -285,11 +359,14 @@ class Wessup(nn.Module):
             # weakly-supervised mode
             propagated_labels = self.label_propagate(self.clf_input_features, sp_labels,
                                                      config.PROPAGATE_THRESHOLD)
-            loss = ce(sp_pred[:labeled_num], sp_labels)
-            propagate_loss = ce(sp_pred[labeled_num:], propagated_labels)
+            loss = ce(self._sp_pred[:labeled_num], sp_labels)
+            propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
             loss += config.PROPAGATE_WEIGHT * propagate_loss
         else:  # fully-supervised mode
-            loss = ce(sp_pred, sp_labels)
+            loss = ce(self._sp_pred, sp_labels)
+
+        # clear outdated superpixel prediction
+        self._sp_pred = None
 
         if metrics is not None and isinstance(metrics, dict):
             metrics['labeled_sp_ratio'] = labeled_num / total_num
@@ -297,6 +374,20 @@ class Wessup(nn.Module):
             metrics['propagate_loss'] = propagate_loss.item()
 
         return loss
+
+    def _pre_evaluate_hook(self, pred, target):
+        pixel_mask, _ = target
+        return pred.argmax(dim=-1), pixel_mask.argmax(dim=-1)
+
+    def save_checkpoint(self, ckpt_path, **kwargs):
+        """Save model checkpoint."""
+
+        torch.save({
+            'backbone': self.backbone_name,
+            'model_state_dict': self.state_dict(),
+            **kwargs,
+        }, ckpt_path)
+        print(f'Checkpoint saved to {ckpt_path}.')
 
     def summary(self):
         """Print summary information."""
