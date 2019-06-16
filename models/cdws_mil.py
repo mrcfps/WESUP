@@ -155,7 +155,10 @@ class CDWS(BaseModel):
         return torch.mean(side_loss + fuse_loss)
 
     def _pre_evaluate_hook(self, pred, target):
-        return pred.round().long(), target[0]
+        pred = pred.round().long()
+        if self.training:
+            target = target[0]
+        return pred, target.argmax(dim=-1)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

@@ -100,7 +100,12 @@ def _transform_multiple_images(*imgs):
 
 
 class SegmentationDataset(Dataset):
-    """Dataset for segmentation task."""
+    """Dataset for segmentation task.
+
+    This dataset returns following data when indexing:
+        - img: tensor of size (3, H, W) with type float32
+        - mask: tensor of size (H, W, C) with type long or an empty tensor
+    """
 
     def __init__(self, root_dir, mode=None, rescale_factor=0.5, train=True):
         # path to original images
@@ -176,7 +181,13 @@ class SegmentationDataset(Dataset):
 
 
 class AreaConstraintDataset(SegmentationDataset):
-    """Segmentation dataset with area information."""
+    """Segmentation dataset with area information.
+
+    This dataset returns following data when indexing:
+        - img: tensor of size (3, H, W) with type float32
+        - mask: tensor of size (H, W, C) with type long or an empty tensor
+        - area: a scalar tensor with type float32 or an empty tensor
+    """
 
     def __init__(self, root_dir, rescale_factor=0.5, train=True):
         super().__init__(root_dir, 'area', rescale_factor, train)
@@ -193,15 +204,20 @@ class AreaConstraintDataset(SegmentationDataset):
             img = ColorJitter(0.3, 0.3, 0.3)(img)
             img, mask = _transform_multiple_images(img, mask)
 
-        img = TF.to_tensor(img)
-        mask = torch.LongTensor(np.array(mask))
+        img, mask = self._convert_image_and_mask_to_tensor(img, mask)
         area = torch.tensor(self.area_info.loc[idx]['area'])
 
         return img, mask, area
 
 
 class PointSupervisionDataset(SegmentationDataset):
-    """One-shot segmentation dataset."""
+    """One-shot segmentation dataset.
+
+    This dataset returns following data when indexing:
+        - img: tensor of size (3, H, W) with type float32
+        - pixel_mask: pixel-level annotation of size (H, W, C) with type long or an empty tensor
+        - point_mask: point-level annotation of size (H, W, C) with type long or an empty tensor
+    """
 
     def __init__(self, root_dir, point_ratio, rescale_factor=0.5, train=True):
         super().__init__(root_dir, 'point', rescale_factor, train)
