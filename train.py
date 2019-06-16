@@ -75,9 +75,10 @@ def train_one_iteration(model, optimizer, phase, *data):
 
     with torch.set_grad_enabled(phase == 'train'):
         pred = model(input_)
-        loss = model.compute_loss(pred, target)
-        metrics['loss'] = loss.item()
         if phase == 'train':
+            loss = model.compute_loss(pred, target)
+            metrics['loss'] = loss.item()
+
             loss.backward()
             optimizer.step()
 
