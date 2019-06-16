@@ -6,6 +6,7 @@ import argparse
 import os
 import warnings
 from shutil import rmtree
+from itertools import chain
 
 import numpy as np
 from tqdm import tqdm
@@ -126,9 +127,10 @@ def fit(args):
 
     ############################# WARMUP #############################
     if args.warmup > 0 and args.model == 'wessup':
-        # only optimize classifier of wessup
+        # optimize parameters other than the CNN part of wessup
+        parameters = chain(model.fc_layers.parameters(), model.classifier.parameters())
         optimizer = optim.SGD(
-            model.classifier.parameters(),
+            parameters,
             lr=0.005,
             momentum=config.MOMENTUM,
             weight_decay=config.WEIGHT_DECAY
@@ -210,6 +212,9 @@ if __name__ == '__main__':
 
     try:
         fit(args)
+    except KeyboardInterrupt:
+        # stop training via Ctrl+C
+        pass
     except:
         rmtree(record_dir, ignore_errors=True)
         raise
