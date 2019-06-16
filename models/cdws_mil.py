@@ -134,8 +134,8 @@ class CDWS(BaseModel):
 
         def mil_loss(output):
             image_pred = output.mean(dim=(2, 3)) ** (1 / self.gmp)  # (B, C)
-            return target_class * torch.log(image_pred) + \
-                (1 - target_class) * torch.log(1 - image_pred)
+            return target_class * -torch.log(image_pred) + \
+                (1 - target_class) * -torch.log(1 - image_pred)
 
         def ac_loss(output):
             area_pred = output.mean(dim=(2, 3))  # (B, C)
