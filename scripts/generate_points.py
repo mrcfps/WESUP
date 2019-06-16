@@ -30,7 +30,7 @@ def _sample_within_region(region_mask, class_label, num_samples=1):
     return np.c_[xs, ys, np.full_like(xs, class_label)]
 
 
-def _generate_points(mask, label_percent=1e-4):
+def _generate_points(mask, point_ratio=1e-4):
     points = []
 
     # loop over all class labels
@@ -42,7 +42,7 @@ def _generate_points(mask, label_percent=1e-4):
             points.append(
                 _sample_within_region(
                     class_mask, class_label,
-                    num_samples=int(class_mask.sum() * label_percent)
+                    num_samples=int(class_mask.sum() * point_ratio)
                 )
             )
         else:
@@ -53,7 +53,7 @@ def _generate_points(mask, label_percent=1e-4):
             # iterate over all instances of this class
             for idx in np.unique(region_indexes):
                 region_mask = class_mask == idx
-                num_samples = max(1, int(region_mask.sum() * label_percent))
+                num_samples = max(1, int(region_mask.sum() * point_ratio))
                 points.append(
                     _sample_within_region(
                         region_mask, class_label, num_samples=num_samples
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Dot annotation generator.')
     parser.add_argument('root_dir',
                         help='Path to data root directory with mask-level annotation.')
-    parser.add_argument('-p', '--label-percent', type=float, default=1e-4,
+    parser.add_argument('-p', '--point-ratio', type=float, default=1e-4,
                         help='Percentage of labeled objects (regions) for each class')
     args = parser.parse_args()
 
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         print('Cannot generate dot annotation without masks.')
         sys.exit(1)
 
-    label_dir = os.path.join(args.root_dir, 'points')
+    label_dir = os.path.join(args.root_dir, f'points-{str(args.point_ratio)}')
 
     if not os.path.exists(label_dir):
         os.mkdir(label_dir)
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     for fname in tqdm(os.listdir(mask_dir)):
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(os.path.join(mask_dir, fname)))
-        points = _generate_points(mask, label_percent=args.label_percent)
+        points = _generate_points(mask, point_ratio=args.point_ratio)
 
         with open(os.path.join(label_dir, f'{basename}.csv'), 'w') as fp:
             writer = csv.writer(fp)
