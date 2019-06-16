@@ -50,6 +50,6 @@ class BaseModel(ABC, nn.Module):
         if not self.training:
             metrics['detection_f1'] = detection_f1(pred, target)
             metrics['object_dice'] = object_dice(pred, target)
-            metrics['object_hausdorff'] = object_hausdorff(pred, target)
+            # metrics['object_hausdorff'] = object_hausdorff(pred, target)
 
         return metrics
