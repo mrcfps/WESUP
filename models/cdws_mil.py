@@ -13,10 +13,10 @@ class CDWS(BaseModel):
     """
 
     # Fixed fusion weights
-    fusion_weights = torch.tensor([0.2, 0.35, 0.45])
+    fusion_weights = torch.tensor([0.2, 0.35, 0.45]).view(1, 3, 1, 1)
 
     # Weights of area constrains loss
-    side_ac_weights = torch.tensor([2.5, 5, 10])
+    side_ac_weights = torch.tensor([[2.5, 5, 10]])
     fuse_ac_weight = 10
 
     # Generalized mean parameter
@@ -91,20 +91,20 @@ class CDWS(BaseModel):
 
         h = F.relu(self.conv2_1(h))
         h = F.relu(self.conv2_2(h))
-        side2 = F.sigmoid(self.side_conv2(h))
+        side2 = torch.sigmoid(self.side_conv2(h))
         side2 = F.interpolate(side2, size=side1.size()[-2:], mode='bilinear')
         h = self.pool2(h)
 
         h = F.relu(self.conv3_1(h))
         h = F.relu(self.conv3_2(h))
         h = F.relu(self.conv3_3(h))
-        side3 = F.sigmoid(self.side_conv3(h))
+        side3 = torch.sigmoid(self.side_conv3(h))
         side3 = F.interpolate(side3, size=side1.size()[-2:], mode='bilinear')
 
         # concatenate side outputs
         self.side_outputs = torch.cat([side1, side2, side3], dim=1)
 
-        fusion_weights = self.fusion_weights.to(x.device).view(1, 3, 1, 1)
+        fusion_weights = self.fusion_weights.to(x.device).detach()
         self.fused_output = torch.sum(self.side_outputs * fusion_weights,
                                       dim=1, keepdim=True)
 
@@ -129,8 +129,8 @@ class CDWS(BaseModel):
 
         _, target_class, target_area = target
         device = target_class.device
-        target_class = target_class.unsqueeze(-1).float()
-        target_area = target_area.unsqueeze(-1)
+        target_class = target_class.unsqueeze(-1).float()  # (B, 1)
+        target_area = target_area.unsqueeze(-1)  # (B, 1)
 
         def mil_loss(output):
             image_pred = output.mean(dim=(2, 3)) ** (1 / self.gmp)  # (B, C)
@@ -139,12 +139,11 @@ class CDWS(BaseModel):
 
         def ac_loss(output):
             area_pred = output.mean(dim=(2, 3))  # (B, C)
-            return target_class * torch.sum((area_pred - target_area) ** 2)
+            return target_class * (area_pred - target_area) ** 2
 
         side_mil_loss = mil_loss(self.side_outputs)  # (B, 3)
         side_ac_loss = ac_loss(self.side_outputs)  # (B, 3)
-        self.side_ac_weights = self.side_ac_weights.to(
-            device).unsqueeze(0)  # (1, 3)
+        self.side_ac_weights = self.side_ac_weights.to(device).detach()  # (1, 3)
         side_loss = side_mil_loss + self.side_ac_weights * side_ac_loss  # (B, 3)
         side_loss = torch.sum(side_loss, dim=1)  # (B,)
 
