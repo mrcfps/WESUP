@@ -22,6 +22,27 @@ class BaseModel(ABC, nn.Module):
     """
 
     @abstractmethod
+    def get_default_dataset(self, root_dir, train=True):
+        """Get default dataset for training/validation.
+
+        Args:
+            root_dir: path to dataset root
+            train: whether it is a dataset for training.
+        """
+
+    @abstractmethod
+    def get_default_optimizer(self, checkpoint=None):
+        """Get default optimizer for training.
+
+        Args:
+            checkpoint (optional): checkpoint to recover optimizer state
+
+        Returns:
+            optimizer: default model optimizer
+            scheduler (optional): default learning rate scheduler
+        """
+
+    @abstractmethod
     def preprocess(self, *data):
         """Preprocess data from dataloaders and return model inputs and targets."""
 

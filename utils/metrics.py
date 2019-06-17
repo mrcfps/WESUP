@@ -32,7 +32,7 @@ def accuracy(P, G):
     """Classification accuracy.
 
     Arguments:
-        P: prediction tensor with arbitrary size
+        P: prediction with size (B, H, W)
         G: ground truth tensor with the same size as P
 
     Returns:
@@ -62,7 +62,7 @@ def detection_f1(S, G, overlap_threshold=0.5):
 
     Arguments:
         S: segmentation mask with shape (H, W)
-        G: ground truth mask with shape (H, W)
+        G: ground truth mask with the same shape as S
         overlap_threshold: overlap threshold for counting true positives
 
     Returns:
@@ -112,20 +112,25 @@ def dice(S, G):
     """Dice index for segmentation evaluation.
 
     Arguments:
-        S: segmentation mask with shape (H, W)
-        G: ground truth mask with shape (H, W)
+        S: segmentation mask with shape (B, H, W)
+        G: ground truth mask with shape (B, H, W)
 
     Returns:
         dice_score: segmentation dice score
     """
 
     if torch.is_tensor(S) and torch.is_tensor(G):
+        S = S.unsqueeze(0) if len(S.size()) == 2 else S
+        G = G.unsqueeze(0) if len(G.size()) == 2 else G
         S, G = S.float(), G.float()
-        dice_score = 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
-        return dice_score.item()
+        dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + config.EPSILON)
+        return dice_score.mean().item()
 
     S, G = np.array(S), np.array(G)
-    return 2 * (G * S).sum() / (G.sum() + S.sum() + config.EPSILON)
+    S = np.expand_dims(S, 0) if len(S.shape) == 2 else S
+    G = np.expand_dims(G, 0) if len(G.shape) == 2 else G
+    dice_score = 2 * (G * S).sum(axis=(1, 2)) / (G.sum(axis=(1, 2)) + S.sum(axis=(1, 2)) + config.EPSILON)
+    return dice_score.mean()
 
 
 @convert_to_numpy

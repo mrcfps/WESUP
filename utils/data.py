@@ -15,7 +15,7 @@ from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 from torchvision.transforms import ColorJitter
 
@@ -107,7 +107,18 @@ class SegmentationDataset(Dataset):
         - mask: tensor of size (H, W, C) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, mode=None, rescale_factor=0.5, train=True):
+    def __init__(self, root_dir, mode=None, target_size=None,
+                 rescale_factor=None, train=True):
+        """Initialize a new SegmentationDataset.
+
+        Args:
+            root_dir: path to dataset root
+            mode: one of `mask`, `area` or `point`
+            target_size: desired output spatial size
+            rescale_factor: multiplier for spatial size
+            train: whether in training mode
+        """
+
         # path to original images
         self.img_paths = _list_images(osp.join(root_dir, "images"))
 
@@ -117,6 +128,7 @@ class SegmentationDataset(Dataset):
             self.mask_paths = _list_images(osp.join(root_dir, "masks"))
 
         self.mode = mode or 'mask' if self.mask_paths is not None else None
+        self.target_size = target_size
         self.rescale_factor = rescale_factor
         self.train = train
 
@@ -127,8 +139,14 @@ class SegmentationDataset(Dataset):
 
     def _read_image_and_mask(self, idx):
         img = Image.open(self.img_paths[idx])
-        target_height = int(np.ceil(self.rescale_factor * img.height))
-        target_width = int(np.ceil(self.rescale_factor * img.width))
+
+        if self.target_size is not None:
+            target_height, target_width = self.target_size
+        elif self.rescale_factor is not None:
+            target_height = int(np.ceil(self.rescale_factor * img.height))
+            target_width = int(np.ceil(self.rescale_factor * img.width))
+        else:
+            target_height, target_width = img.height, img.width
 
         img = img.resize((target_width, target_height), resample=Image.BILINEAR)
 
@@ -189,8 +207,8 @@ class AreaConstraintDataset(SegmentationDataset):
         - area: a scalar tensor with type float32 or an empty tensor
     """
 
-    def __init__(self, root_dir, rescale_factor=0.5, train=True):
-        super().__init__(root_dir, 'area', rescale_factor, train)
+    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
+        super().__init__(root_dir, 'area', target_size, rescale_factor, train)
 
         # area information (# foreground pixels divided by total pixels, between 0 and 1)
         self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
@@ -219,17 +237,11 @@ class PointSupervisionDataset(SegmentationDataset):
         - point_mask: point-level annotation of size (H, W, C) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, point_ratio, rescale_factor=0.5, train=True):
-        super().__init__(root_dir, 'point', rescale_factor, train)
+    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
+        super().__init__(root_dir, 'point', target_size, rescale_factor, train)
 
         # path to point supervision directory
-        self.point_root = osp.join(root_dir, f'points-{point_ratio}')
-
-        if not osp.exists(self.point_root):
-            raise Exception(
-                f'Point supervision with ratio {point_ratio} does not exist. '
-                f'Run scripts/generate_points.py to generate.'
-            )
+        self.point_root = osp.join(root_dir, f'points')
 
         # path to point annotation files
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
@@ -266,49 +278,3 @@ class PointSupervisionDataset(SegmentationDataset):
             point_mask = empty_tensor()
 
         return img, pixel_mask, point_mask
-
-
-def get_trainval_dataloaders(root_dir, mode=None, point_ratio=None, num_workers=4):
-    """Returns training and validation dataloaders.
-
-    Args:
-        root_dir: path to dataset root
-        mode: supervision mode (one of "mask", "point" or "area")
-        point_ratio: supervised point ratio (only relevant when `mode` is set to "point")
-        num_workers: number of workers for dataloaders
-
-    Returns:
-        dataloaders: a dict with two keys "train" and "val" with their respective
-            datasets as values
-    """
-
-    datasets = {}
-
-    train_dir = osp.join(root_dir, "train")
-    if mode == 'point':
-        datasets['train'] = PointSupervisionDataset(train_dir,
-                                                    point_ratio,
-                                                    rescale_factor=config.RESCALE_FACTOR)
-    elif mode == 'area':
-        datasets['train'] = AreaConstraintDataset(train_dir,
-                                                  rescale_factor=config.RESCALE_FACTOR)
-    elif mode == 'mask':
-        datasets['train'] = SegmentationDataset(train_dir, mode='mask',
-                                                rescale_factor=config.RESCALE_FACTOR)
-
-    datasets["val"] = SegmentationDataset(
-        osp.join(root_dir, "val"),
-        rescale_factor=config.RESCALE_FACTOR,
-        train=False,
-    )
-
-    dataloaders = {
-        "train": DataLoader(
-            datasets["train"], batch_size=1, shuffle=True, num_workers=num_workers
-        ),
-        "val": DataLoader(
-            datasets["val"], batch_size=1, shuffle=True, num_workers=num_workers
-        ),
-    }
-
-    return dataloaders

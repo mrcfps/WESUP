@@ -20,7 +20,6 @@ from models import CDWS
 from utils import record
 from utils import log
 from utils.history import HistoryTracker
-from utils.data import get_trainval_dataloaders
 
 warnings.filterwarnings('ignore')
 
@@ -42,24 +41,17 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('--model', default='wessup', choices=['wessup', 'cdws'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
                         help='Which model to use')
-    parser.add_argument('--mode', default='point', choices=['point', 'area', 'mask'],
-                        help='Supervision mode')
-    parser.add_argument('-p', '--point-ratio', type=float, default=5e-5,
-                        help='Ratio of annotated points and total pixels')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
+    parser.add_argument('-b', '--batch-size', type=int, default=1, help='Minibatch size')
     parser.add_argument('-w', '--warmup', type=int, default=0,
                         help='Number of warmup epochs (freeze CNN) before training')
     parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
                         help='Number of CPUs to use for preparing superpixels')
-    parser.add_argument('-b', '--backbone', default='vgg16',
-                        help='CNN backbone to use (such as vgg13, resnet50 and densenet121)')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='Learning rate for optimizer')
     parser.add_argument('--message', help='Note on this experiment')
     parser.add_argument('--smoke', action='store_true', default=False,
                         help='Whether this is a smoke test')
@@ -117,13 +109,26 @@ def fit(args):
         checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
     if args.model == 'wessup':
-        model = Wessup(args.backbone, checkpoint=checkpoint)
+        model = Wessup(checkpoint=checkpoint)
     elif args.model == 'cdws':
         model = CDWS(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {args.model}')
 
     model = model.to(device)
+
+    ############################# DATA #############################
+    global dataloaders
+    dataloaders = {
+        'train': torch.utils.data.DataLoader(
+            model.get_default_dataset(os.path.join(args.dataset_path, 'train')),
+            batch_size=args.batch_size, shuffle=True, num_workers=args.jobs
+        ),
+        'val': torch.utils.data.DataLoader(
+            model.get_default_dataset(os.path.join(args.dataset_path, 'val'), train=False),
+            batch_size=1, num_workers=args.jobs
+        ),
+    }
 
     ############################# WARMUP #############################
     if args.warmup > 0 and args.model == 'wessup':
@@ -141,32 +146,10 @@ def fit(args):
             log('\nWarmup epoch {}/{}'.format(epoch, args.warmup), '-')
             train_one_epoch(model, optimizer, warmup=True)
 
-    ############################ OPTIMIZER ############################
-    if checkpoint is not None:
-        # load previous optimizer states and set learning rate to given value
-        optimizer = optim.SGD(
-            model.parameters(),
-            lr=args.lr
-        )
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        optimizer.param_groups[0]['lr'] = args.lr
-
-        initial_epoch = checkpoint['epoch'] + 1
-    else:
-        optimizer = optim.SGD(
-            model.parameters(),
-            lr=args.lr,
-            momentum=config.MOMENTUM,
-            weight_decay=config.WEIGHT_DECAY
-        )
-        initial_epoch = 1
-
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',
-                                                     factor=0.5, min_lr=1e-7,
-                                                     verbose=True)
-
     ############################# TRAIN #############################
     log('\nTraining Stage', '=')
+    optimizer, scheduler = model.get_default_optimizer(checkpoint)
+    initial_epoch = checkpoint['epoch'] + 1 if checkpoint is not None else 1
     total_epochs = args.epochs + initial_epoch - 1
 
     for epoch in range(initial_epoch, total_epochs + 1):
@@ -174,7 +157,9 @@ def fit(args):
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
         train_one_epoch(model, optimizer)
-        scheduler.step(np.mean(tracker.history['val_dice']))
+
+        if scheduler is not None:
+            scheduler.step(np.mean(tracker.history['val_dice']))
 
         # save metrics to csv file
         tracker.save()
@@ -197,9 +182,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = args.device
-    dataloaders = get_trainval_dataloaders(
-        args.dataset_path, mode=args.mode,
-        point_ratio=args.point_ratio, num_workers=args.jobs)
 
     if args.resume_ckpt is not None:
         record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
