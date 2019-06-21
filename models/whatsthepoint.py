@@ -110,7 +110,7 @@ class WhatsThePoint(BaseModel):
 
         return torch.mean(image_loss + point_loss + obj_loss)
 
-    def _pre_evaluate_hook(self, pred, target):
+    def postprocess(self, pred, target):
         pred = pred.argmax(dim=1)  # (B, H, W)
         if self.training:
             target = target[0]

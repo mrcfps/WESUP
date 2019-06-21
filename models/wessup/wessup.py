@@ -38,7 +38,7 @@ class WessupConfig:
     sp_compactness = 40
 
     # Weight for label-propagated samples when computing loss function
-    propagate_threshold = 0.5
+    propagate_threshold = 0.8
 
     # Weight for label-propagated samples when computing loss function
     propagate_weight = 0.5
@@ -243,7 +243,7 @@ class Wessup(BaseModel):
 
         return loss
 
-    def _pre_evaluate_hook(self, pred, target):
+    def postprocess(self, pred, target):
         pixel_mask, _ = target
         return pred.argmax(dim=-1), pixel_mask.argmax(dim=-1)
 

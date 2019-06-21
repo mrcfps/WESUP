@@ -20,6 +20,10 @@ from models import CDWS
 from models import WhatsThePoint
 from utils import record
 from utils import log
+from utils.metrics import accuracy
+from utils.metrics import dice
+from utils.metrics import detection_f1
+from utils.metrics import object_dice
 from utils.history import HistoryTracker
 
 warnings.filterwarnings('ignore')
@@ -76,7 +80,12 @@ def train_one_iteration(model, optimizer, phase, *data):
             loss.backward()
             optimizer.step()
 
-    tracker.step({**metrics, **model.evaluate(pred, target)})
+    metric_funcs = [accuracy, dice]
+    if phase == 'val':
+        metric_funcs.extend([detection_f1, object_dice])
+
+    pred, target = model.postprocess(pred, target)
+    tracker.step({**metrics, **model.evaluate(pred, target, metric_funcs)})
 
 
 def train_one_epoch(model, optimizer, warmup=False):

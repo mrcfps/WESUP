@@ -2,12 +2,6 @@ from abc import ABC, abstractmethod
 
 import torch.nn as nn
 
-from utils.metrics import accuracy
-from utils.metrics import dice
-from utils.metrics import detection_f1
-from utils.metrics import object_dice
-from utils.metrics import object_hausdorff
-
 
 class BaseModel(ABC, nn.Module):
     """A base model class.
@@ -18,6 +12,8 @@ class BaseModel(ABC, nn.Module):
     >>> input_, target = model.preprocess(*data)
     >>> pred = model(input_)
     >>> loss = model.compute_loss(pred, target)
+    >>> pred, target = model.postprocess(pred, target)
+    >>> metrics = model.evaluate(pred, target)
     >>> model.save_checkpoint('/path/to/ckpt')
     """
 
@@ -55,22 +51,15 @@ class BaseModel(ABC, nn.Module):
         """Save model checkpoint."""
 
     @abstractmethod
-    def _pre_evaluate_hook(self, pred, target):
-        """Hook function to run before calling evaluate method."""
+    def postprocess(self, pred, target):
+        """Postprocess raw prediction and target before calling evaluate method."""
 
-    def evaluate(self, pred, target):
+    def evaluate(self, pred, target, metric_funcs):
         """Running several metrics to evaluate model performance."""
 
-        pred, target = self._pre_evaluate_hook(pred, target)
-        metrics = {
-            'pixel_acc': accuracy(pred, target),
-            'dice': dice(pred, target),
-        }
+        metrics = {}
 
-        # calculate object-level metrics in validation phase
-        if not self.training:
-            metrics['detection_f1'] = detection_f1(pred, target)
-            metrics['object_dice'] = object_dice(pred, target)
-            # metrics['object_hausdorff'] = object_hausdorff(pred, target)
+        for func in metric_funcs:
+            metrics[func.__name__] = func(pred, target)
 
         return metrics

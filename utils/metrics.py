@@ -5,8 +5,9 @@ Code of `detection_f1`, `object_dice` and `object_hausdorff` are adapted from
 https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/evaluation/evaluation_metrics_v6.zip.
 """
 
-import torch
+import functools
 
+import torch
 import numpy as np
 from scipy import stats
 from scipy.spatial.distance import directed_hausdorff
@@ -18,6 +19,7 @@ import config
 def convert_to_numpy(func):
     """Decorator for converting each argument to numpy array."""
 
+    @functools.wraps(func)
     def wrapper(*args):
         args = [
             arg.detach().cpu().numpy() if torch.is_tensor(arg) else np.array(arg)

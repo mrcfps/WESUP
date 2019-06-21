@@ -190,7 +190,7 @@ class CDWS(BaseModel):
 
         return torch.mean(side_loss + fuse_loss)
 
-    def _pre_evaluate_hook(self, pred, target):
+    def postprocess(self, pred, target):
         pred = pred.round().long()
         if self.training:
             target = target[0]
