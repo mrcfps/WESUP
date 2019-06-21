@@ -11,6 +11,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 from PIL import Image
+from skimage.transform import resize
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
 
@@ -137,9 +138,7 @@ class SegmentationDataset(Dataset):
     def __len__(self):
         return len(self.img_paths)
 
-    def _read_image_and_mask(self, idx):
-        img = Image.open(self.img_paths[idx])
-
+    def _resize_image_and_mask(self, img, mask=None):
         if self.target_size is not None:
             target_height, target_width = self.target_size
         elif self.rescale_factor is not None:
@@ -151,9 +150,7 @@ class SegmentationDataset(Dataset):
         img = img.resize((target_width, target_height), resample=Image.BILINEAR)
 
         # pixel-level annotation mask
-        mask = None
-        if self.mask_paths is not None:
-            mask = Image.open(self.mask_paths[idx])
+        if mask is not None:
             mask = mask.resize((target_width, target_height), resample=Image.NEAREST)
 
         return img, mask
@@ -174,7 +171,10 @@ class SegmentationDataset(Dataset):
         return img, mask
 
     def __getitem__(self, idx):
-        img, mask = self._read_image_and_mask(idx)
+        img = Image.open(self.img_paths[idx])
+        if self.mask_paths is not None:
+            mask = Image.open(self.mask_paths[idx])
+        img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
             # perform data augmentation
@@ -215,7 +215,12 @@ class AreaConstraintDataset(SegmentationDataset):
                                      usecols=['img', 'area'])
 
     def __getitem__(self, idx):
-        img, mask = self._read_image_and_mask(idx)
+        img = Image.open(self.img_paths[idx])
+
+        mask = None
+        if self.mask_paths is not None:
+            mask = Image.open(self.mask_paths[idx])
+        img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
             # perform data augmentation
@@ -235,9 +240,11 @@ class PointSupervisionDataset(SegmentationDataset):
         - img: tensor of size (3, H, W) with type float32
         - pixel_mask: pixel-level annotation of size (H, W, C) with type long or an empty tensor
         - point_mask: point-level annotation of size (H, W, C) with type long or an empty tensor
+        - obj_prior (optional): objectness prior of size (H, W) with type float32
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None,
+                 include_obj_prior=False, train=True):
         super().__init__(root_dir, 'point', target_size, rescale_factor, train)
 
         # path to point supervision directory
@@ -246,15 +253,35 @@ class PointSupervisionDataset(SegmentationDataset):
         # path to point annotation files
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
 
+        # path to objectness prior
+        self.obj_prior_paths = sorted(glob.glob(
+            osp.join(root_dir, 'objectness', '*.npy'))) if include_obj_prior else None
+
     def __getitem__(self, idx):
-        img, pixel_mask = self._read_image_and_mask(idx)
+        img = Image.open(self.img_paths[idx])
+
+        pixel_mask = None
+        if self.mask_paths is not None:
+            pixel_mask = Image.open(self.mask_paths[idx])
+
+        orig_height, orig_width = img.height, img.width
+        img, pixel_mask = self._resize_image_and_mask(img, pixel_mask)
 
         point_mask = None
+
+        # how much we would like to rescale coordinates of each point
+        # (the last dimension is target class, which should be kept the same)
+        if self.rescale_factor is None:
+            rescaler = np.array([
+                [self.target_size[0] / orig_height, self.target_size[1] / orig_width, 1]
+            ])
+        else:
+            rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
+
         if self.point_paths is not None:
             with open(self.point_paths[idx]) as fp:
                 points = np.array([[int(d) for d in point]
                                    for point in csv.reader(fp)])
-                rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
                 points = np.floor(points * rescaler).astype('int')
 
             # compute point mask
@@ -276,5 +303,12 @@ class PointSupervisionDataset(SegmentationDataset):
             point_mask = torch.LongTensor(point_mask)
         else:
             point_mask = empty_tensor()
+
+        if self.obj_prior_paths is not None:
+            # obj_prior = TF.to_tensor(Image.open(self.obj_prior_paths[idx])).squeeze()
+            obj_prior = np.load(self.obj_prior_paths[idx])
+            obj_prior = resize(obj_prior, self.target_size)
+            obj_prior = torch.Tensor(obj_prior)
+            return img, pixel_mask, point_mask, obj_prior
 
         return img, pixel_mask, point_mask

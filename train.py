@@ -17,6 +17,7 @@ import torch.optim as optim
 import config
 from models import Wessup
 from models import CDWS
+from models import WhatsThePoint
 from utils import record
 from utils import log
 from utils.history import HistoryTracker
@@ -41,7 +42,7 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
                         help='Which model to use')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
@@ -112,6 +113,8 @@ def fit(args):
         model = Wessup(checkpoint=checkpoint)
     elif args.model == 'cdws':
         model = CDWS(checkpoint=checkpoint)
+    elif args.model == 'wtp':
+        model = WhatsThePoint(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {args.model}')
 
