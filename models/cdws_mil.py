@@ -111,7 +111,7 @@ class CDWS(BaseModel):
     def preprocess(self, *data):
         if self.training:
             img, mask, area = data
-            target_class = (area > 0).long()
+            target_class = (area > 0).float()
             return img, (mask, target_class, area)
         else:
             return data
@@ -150,9 +150,10 @@ class CDWS(BaseModel):
 
         Args:
             pred: model prediction
-            target: a tuple containing image-level labels (should be a tensor of size (B,),
-                with 0 represents background and 1 represents foreground) and relative sizes
-                (between 0 and 1) of foreground (should be a tensor of size (B,))
+            target: a tuple containing following elements:
+                1) pixel-level annotation of size (B, H, W)
+                2) image-level labels of size (B,) (0 is background and 1 is foreground)
+                3) relative sizes of foreground (between 0 and 1) of size (B,)
 
         Returns:
             loss: loss for side outputs and fused output
@@ -164,7 +165,7 @@ class CDWS(BaseModel):
 
         _, target_class, target_area = target
         device = target_class.device
-        target_class = target_class.unsqueeze(-1).float()  # (B, 1)
+        target_class = target_class.unsqueeze(-1)  # (B, 1)
         target_area = target_area.unsqueeze(-1)  # (B, 1)
 
         def mil_loss(output):
