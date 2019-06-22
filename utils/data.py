@@ -172,6 +172,7 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx])
+        mask = None
         if self.mask_paths is not None:
             mask = Image.open(self.mask_paths[idx])
         img, mask = self._resize_image_and_mask(img, mask)
