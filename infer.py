@@ -6,215 +6,198 @@ import argparse
 import csv
 import os
 import warnings
-from collections import defaultdict
 from importlib import import_module
-from shutil import copyfile
+from shutil import copytree, rmtree
 
 import torch
-from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
-from skimage.transform import resize
+from skimage.io import imread
 
-import config
-from utils.data import SegmentationDataset
 from utils.metrics import accuracy
 from utils.metrics import detection_f1
 from utils.metrics import dice
 from utils.metrics import object_dice
 from utils.metrics import object_hausdorff
-from utils.preprocessing import preprocess_superpixels
 
 warnings.filterwarnings('ignore')
 
 
-def compute_mask_with_superpixel_prediction(sp_pred, sp_maps):
-    """
-    Compute patch mask from superpixel predictions.
+def build_cli_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('dataset_path', help='Path to dataset')
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
+                        help='Which model to use')
+    parser.add_argument('-b', '--batch-size', type=int, default=1,
+                        help='Batch size for inference')
+    parser.add_argument('-c', '--checkpoint',
+                        help='Path to checkpoint')
+    parser.add_argument('--no-gpu', action='store_true', default=False,
+                        help='Whether to avoid using gpu')
+    parser.add_argument('-o', '--output', default='predictions',
+                        help='Path to store visualization and metrics result')
+    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
+                        help='Number of CPUs to use for preprocessing')
 
-    Arguments:
-        sp_pred: superpixel predictions with size (N, n_classes)
-        sp_maps: superpixel maps with size (N, H, W)
-
-    Returns:
-        pred_mask: segmentation pprediction with size (H, W, n_classes)
-    """
-
-    # flatten sp_maps to one channel
-    sp_maps = sp_maps.argmax(dim=0)
-
-    # initialize prediction mask
-    height, width = sp_maps.size()
-    pred_mask = torch.zeros(height, width, sp_pred.size(1))
-    pred_mask = pred_mask.to(sp_maps.device)
-
-    for sp_idx in range(sp_maps.max().item() + 1):
-        pred_mask[sp_maps == sp_idx] = sp_pred[sp_idx]
-
-    return pred_mask
+    return parser
 
 
-def predict(model, dataloader):
+def prepare_model(model_type, ckpt_path=None, device='cpu'):
+    """Prepare model for inference."""
+
+    checkpoint = None
+    if ckpt_path is not None:
+        checkpoint = torch.load(ckpt_path, map_location=device)
+        print(f'Loaded checkpoint from {ckpt_path}.')
+
+    # copy models module next to checkpoint directory (if present)
+    models_dir = os.path.join(ckpt_path, '..', '..', 'source', 'models')
+    models_path = 'models_ckpt'
+    if os.path.exists(models_dir):
+        copytree(models_dir, models_path)
+    else:
+        # fall back to current models module
+        models_path = 'models'
+
+    models = import_module(models_path)
+
+    if model_type == 'wessup':
+        model = models.Wessup(checkpoint=checkpoint)
+    elif model_type == 'cdws':
+        model = models.CDWS(checkpoint=checkpoint)
+    elif model_type == 'wtp':
+        model = models.WhatsThePoint(checkpoint=checkpoint)
+    else:
+        raise ValueError(f'Unsupported model: {model_type}')
+
+    return model.to(device).eval()
+
+
+def predict(model, dataset, batch_size=1, num_workers=4, device='cpu'):
     """Predict on a directory of images.
 
     Arguments:
         model: inference model (should be a `torch.nn.Module`)
-        dataloader: PyTorch DataLoader instance
+        dataset: instance of `torch.utils.data.Dataset`
+        batch_size: mini-batch size for inference
+        num_workers: number of workers to load data
+        device: target device
 
     Returns:
-        predictions: a list of predicted mask, each of which is a tensor of
-            size (H, W, n_classes)
+        predictions: model predictions of size (N, H, W)
     """
 
-    model.eval()
-    device = next(model.parameters()).device
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, num_workers=num_workers)
 
+    print(f'\nPredicting {len(dataset)} images ...')
+    pbar = tqdm(total=len(dataset))
     predictions = []
-
-    for data in tqdm(dataloader):
-        img, segments = data[:2]
-
-        img = img.to(device)
-        segments = segments.to(device).squeeze()
-        sp_maps = preprocess_superpixels(segments)
+    for data in dataloader:
+        data = [datum.to(device) for datum in data]
+        input_, target = model.preprocess(*data)
 
         with torch.no_grad():
-            sp_pred = model(img, sp_maps)
+            pred = model(input_)
 
-        pred_mask = compute_mask_with_superpixel_prediction(sp_pred, sp_maps)
-        predictions.append(pred_mask)
+        pred, _ = model.postprocess(pred, target)
+        predictions.append(pred)
+
+        pbar.update(data[0].size(0))
+
+    predictions = torch.cat(predictions)
 
     return predictions
 
 
-def infer(model, data_dir, viz_dir=None, epoch=None, num_workers=4):
-    """Making inference on a directory of images
+def resize_pred_to_original_size(predictions, dataset):
+    """Resize each prediction back to its original size."""
 
-    Arguments:
-        model: inference model (should be a `torch.nn.Module`)
-        data_dir: path to dataset, which should contains at least a subdirectory `images`
-            with all images to be predicted
-        viz_dir: path to store visualization and metrics results
-        epoch: current training epoch
-        num_workers: number of workers to load data
+    print('\nResizing predictions back to original sizes ...')
+
+    results = []
+    for pred, img_path in tqdm(zip(predictions, dataset.img_paths),
+                               total=len(predictions)):
+        img = Image.open(img_path)
+        pred = pred.unsqueeze(0).unsqueeze(0).float()
+        pred = F.interpolate(pred, size=(img.height, img.width))
+        results.append(pred.squeeze().cpu().numpy())
+
+    return results
+
+
+def save_predictions(predictions, dataset, output_dir='predictions'):
+    """Save predictions to disk.
+
+    Args:
+        predictions: model predictions of size (N, H, W)
+        dataset: dataset for prediction, used for naming the prediction output
+        output_dir: path to output directory
     """
 
-    dataset = SegmentationDataset(
-        data_dir, rescale_factor=config.RESCALE_FACTOR, train=False)
-    dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
+    print(f'\nSaving prediction to {output_dir} ...')
 
-    print(f'Predicting {len(dataset)} images ...')
-    predictions = predict(model, dataloader)
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 
-    if viz_dir is not None and not os.path.exists(viz_dir):
-        os.mkdir(viz_dir)
+    for pred, img_path in tqdm(zip(predictions, dataset.img_paths), total=len(predictions)):
+        img_name = os.path.basename(img_path)
+        pred = pred.astype('uint8')
+        Image.fromarray(pred * 255).save(os.path.join(output_dir, img_name))
 
-    # whether to compute metrics
-    evaluate = dataset.mask_paths is not None
 
-    if evaluate:
-        # record metrics of each image
-        metrics = defaultdict(list)
+def report_metrics(metrics):
+    print('Mean Overall Accuracy:', metrics['accuracy'])
+    print('Mean Dice:', metrics['dice'])
+    print('Mean Detection F1:', metrics['detection_f1'])
+    print('Mean Object Dice:', metrics['object_dice'])
+    print('Mean Object Hausdorff:', metrics['object_hausdorff'])
 
-    print('Computing metrics ...')
-    for idx, pred_mask in tqdm(enumerate(predictions), total=len(predictions)):
-        orig_img = Image.open(dataset.img_paths[idx])
-        pred_mask = pred_mask.cpu().numpy()
-        pred_mask = pred_mask.argmax(axis=-1)
 
-        # resize mask to match the size of original image
-        pred_mask = resize(pred_mask, (orig_img.height,
-                                       orig_img.width), order=0, preserve_range=True)
-        pred_mask = pred_mask.astype('uint8')
+def infer(model, data_dir, output_dir=None, batch_size=1,
+          num_workers=4, device='cpu'):
+    """Making inference on a directory of images with given model checkpoint."""
 
-        if evaluate:
-            mask = np.array(Image.open(dataset.mask_paths[idx]))
-            metrics['accuracy'].append(accuracy(pred_mask, mask))
-            metrics['detection_f1'].append(detection_f1(pred_mask, mask))
-            metrics['dice'].append(dice(pred_mask, mask))
-            metrics['object_dice'].append(object_dice(pred_mask, mask))
-            metrics['object_hausdorff'].append(object_hausdorff(pred_mask, mask))
+    if output_dir is not None and not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 
-        if viz_dir is not None:
-            img_name = os.path.basename(dataset.img_paths[idx])
-            extname = os.path.splitext(img_name)[-1]
-            pred_name = img_name.replace(
-                extname, f'.pred{"-" + str(epoch) if epoch else ""}{extname}')
+    dataset = model.get_default_dataset(data_dir, train=False)
 
-            # save original image
-            orig_img.save(os.path.join(viz_dir, img_name))
+    predictions = predict(model, dataset, batch_size=batch_size,
+                          num_workers=num_workers, device=device)
+    predictions = resize_pred_to_original_size(predictions, dataset)
 
-            # save prediction
-            Image.fromarray(pred_mask * 255).save(os.path.join(viz_dir, pred_name))
+    if output_dir is not None:
+        save_predictions(predictions, dataset, output_dir)
 
-            # save ground truth if any
-            if evaluate:
-                mask_name = img_name.replace(extname, f'.gt{extname}')
-                Image.fromarray(mask * 255).save(os.path.join(viz_dir, mask_name))
+    if dataset.mask_paths is not None:
+        targets = [imread(mask_path) for mask_path in dataset.mask_paths]
+        metric_funcs = [accuracy, dice, detection_f1, object_dice, object_hausdorff]
 
-    if viz_dir is not None:
-        print(f'Prediction has been saved to {viz_dir}.')
+        print('\nComputing metrics ...')
+        metrics = model.evaluate(predictions, targets, metric_funcs, verbose=True)
+        report_metrics(metrics)
 
-    if evaluate:
-        metrics = {
-            k: np.mean(v)
-            for k, v in metrics.items()
-        }
-
-        print('Mean Overall Accuracy:', metrics['accuracy'])
-        print('Mean Dice:', metrics['dice'])
-        print('Mean Detection F1:', metrics['detection_f1'])
-        print('Mean Object Dice:', metrics['object_dice'])
-        print('Mean Object Hausdorff:', metrics['object_hausdorff'])
-
-        if viz_dir is not None:
-            metrics_path = os.path.join(viz_dir, 'metrics.csv')
-            if not os.path.exists(metrics_path):
-                with open(metrics_path, 'w') as fp:
-                    writer = csv.writer(fp)
-                    writer.writerow(['epoch'] + list(metrics.keys()))
-                    writer.writerow([epoch] + list(metrics.values()))
-            else:
-                with open(metrics_path, 'a') as fp:
-                    writer = csv.writer(fp)
-                    writer.writerow([epoch] + list(metrics.values()))
+        if output_dir is not None:
+            metrics_path = os.path.join(output_dir, 'metrics.csv')
+            with open(metrics_path, 'w') as fp:
+                writer = csv.writer(fp)
+                writer.writerow(metrics.keys())
+                writer.writerow(metrics.values())
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-c', '--checkpoint', required=True,
-                        help='Path to checkpoint')
-    parser.add_argument('--wessup-module',
-                        help='Path to wessup module (.py file)')
-    parser.add_argument('--no-gpu', action='store_true', default=False,
-                        help='Whether to avoid using gpu')
-    parser.add_argument('-o', '--output',
-                        help='Path to store visualization and metrics result')
-    parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
-                        help='Number of CPUs to use for preprocessing')
-
+    parser = build_cli_parser()
     args = parser.parse_args()
 
     device = 'cpu' if args.no_gpu or not torch.cuda.is_available() else 'cuda'
-
-    wessup_module = args.wessup_module
-    if wessup_module is None:
-        wessup_module = os.path.join(
-            args.checkpoint, '..', '..', 'source', 'wessup.py')
-        wessup_module = os.path.abspath(wessup_module)
-    copyfile(wessup_module, 'wessup_ckpt.py')
+    model = prepare_model(args.model, args.checkpoint, device=device)
 
     try:
-        wessup = import_module('wessup_ckpt')
-        ckpt = torch.load(args.checkpoint, map_location=device)
-        model = wessup.Wessup(ckpt['backbone'])
-        model = model.to(device)
-        model.load_state_dict(ckpt['model_state_dict'])
-        print(f'Loaded checkpoint from {args.checkpoint}.')
-        infer(model, args.dataset_path, args.output,
-              epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, args.dataset_path, output_dir=args.output,
+              batch_size=args.batch_size, num_workers=args.jobs, device=device)
     finally:
-        os.remove('wessup_ckpt.py')
+        rmtree('models_ckpt', ignore_errors=True)

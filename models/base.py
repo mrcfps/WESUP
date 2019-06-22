@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+from collections import defaultdict
 
 import torch.nn as nn
+import numpy as np
+from tqdm import tqdm
 
 
 class BaseModel(ABC, nn.Module):
@@ -23,7 +26,10 @@ class BaseModel(ABC, nn.Module):
 
         Args:
             root_dir: path to dataset root
-            train: whether it is a dataset for training.
+            train: whether it is a dataset for training
+
+        Returns:
+            dataset: a `torch.utils.data.Dataset` instance
         """
 
     @abstractmethod
@@ -31,35 +37,81 @@ class BaseModel(ABC, nn.Module):
         """Get default optimizer for training.
 
         Args:
-            checkpoint (optional): checkpoint to recover optimizer state
+            checkpoint: checkpoint to recover optimizer state
 
         Returns:
             optimizer: default model optimizer
-            scheduler (optional): default learning rate scheduler
+            scheduler: default learning rate scheduler (could be `None`)
         """
 
     @abstractmethod
     def preprocess(self, *data):
-        """Preprocess data from dataloaders and return model inputs and targets."""
+        """Preprocess data from dataloaders and return model inputs and targets.
+
+        Args:
+            *data: data returned from dataloaders
+
+        Returns:
+            input: input to feed into the model of size (B, H, W)
+            target: desired output (or any additional information) to compute loss
+                and evaluate performance
+        """
 
     @abstractmethod
     def compute_loss(self, pred, target, metrics=None):
-        """Compute objective function."""
+        """Compute objective function.
+
+        Args:
+            pred: model prediction from the `forward` step
+            target: target computed from `preprocess` method
+
+        Returns:
+            loss: model loss
+        """
 
     @abstractmethod
     def save_checkpoint(self, ckpt_path, **kwargs):
-        """Save model checkpoint."""
+        """Save model checkpoint.
+
+        Args:
+            ckpt_path: path to checkpoint to be saved
+            kwargs: additional information to be included in the checkpoint object
+        """
 
     @abstractmethod
     def postprocess(self, pred, target):
-        """Postprocess raw prediction and target before calling evaluate method."""
+        """Postprocess raw prediction and target before calling `evaluate` method.
 
-    def evaluate(self, pred, target, metric_funcs):
-        """Running several metrics to evaluate model performance."""
+        Args:
+            pred: prediction computed from the `forward` step
+            target: target computed from `preprocess` method
 
-        metrics = {}
+        Returns:
+            pred: postprocessed prediction
+            target: postprocessed target
+        """
 
-        for func in metric_funcs:
-            metrics[func.__name__] = func(pred, target)
+    def evaluate(self, pred, target, metric_funcs, verbose=False):
+        """Running several metrics to evaluate model performance.
 
-        return metrics
+        Args:
+            pred: prediction of size (B, H, W), either torch.Tensor or numpy array
+            target: ground truth of size (B, H, W), either torch.Tensor or numpy array
+            metric_funcs: list of metric functions
+            verbose: whether to show progress bar
+
+        Returns:
+            metrics: a dictionary containing all metrics
+        """
+
+        metrics = defaultdict(list)
+
+        iterable = zip(pred, target)
+        if verbose:
+            iterable = tqdm(iterable, total=len(pred))
+
+        for P, G in iterable:
+            for func in metric_funcs:
+                metrics[func.__name__].append(func(P, G))
+
+        return {k: np.mean(v) for k, v in metrics.items()}

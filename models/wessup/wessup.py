@@ -164,17 +164,17 @@ class Wessup(BaseModel):
 
         sp_maps, sp_labels = preprocess_superpixels(segments, mask)
 
-        return (img, sp_maps), (pixel_mask, sp_labels)
+        return (img, sp_maps), (pixel_mask.unsqueeze(0), sp_labels)
 
     def forward(self, x):
         """Running a forward pass.
 
         Args:
-            x: a tuple containing input tensor of size (B, C, H, W) and
+            x: a tuple containing input tensor of size (1, C, H, W) and
                 stacked superpixel maps with size (N, H, W)
 
         Returns:
-            pred: prediction with size (H, W)
+            pred: prediction with size (1, H, W)
         """
 
         x, sp_maps = x
@@ -204,7 +204,7 @@ class Wessup(BaseModel):
         for sp_idx in range(sp_maps.max().item() + 1):
             pred[sp_maps == sp_idx] = self._sp_pred[sp_idx]
 
-        return pred
+        return pred.unsqueeze(0)
 
     def compute_loss(self, pred, target, metrics=None):
         device = pred.device

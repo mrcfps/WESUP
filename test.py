@@ -1,49 +1,43 @@
+"""Test script to GlaS dataset."""
+
 import argparse
 import os
-from importlib import import_module
-from shutil import copyfile
+from shutil import rmtree
 
 import torch
 
-from infer import infer
+from infer import prepare_model, infer
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-c', '--checkpoint', required=True, help='Path to checkpoint')
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
+                        help='Which model to use')
+    parser.add_argument('-c', '--checkpoint', help='Path to checkpoint')
     parser.add_argument('--no-gpu', action='store_true', default=False,
                         help='Whether to avoid using gpu')
-    parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
+    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
                         help='Number of CPUs to use for preprocessing')
     args = parser.parse_args()
 
     device = 'cpu' if args.no_gpu or not torch.cuda.is_available() else 'cuda'
     record_dir = os.path.abspath(os.path.join(args.checkpoint, '..', '..'))
+    results_dir = os.path.join(record_dir, 'results')
+    if not os.path.exists(results_dir):
+        os.mkdir(results_dir)
 
-    wessup_module = os.path.join(record_dir, 'source', 'wessup.py')
-    copyfile(wessup_module, 'wessup_ckpt.py')
+    model = prepare_model(args.model, args.checkpoint, device=device)
 
     try:
-        wessup = import_module('wessup_ckpt')
-        ckpt = torch.load(args.checkpoint, map_location=device)
-        model = wessup.Wessup(ckpt['backbone'])
-        model.to(device)
-        model.load_state_dict(ckpt['model_state_dict'])
-        print(f'Loaded checkpoint from {args.checkpoint}.')
-
-        results_dir = os.path.join(record_dir, 'results')
-        if not os.path.exists(results_dir):
-            os.mkdir(results_dir)
-
         print('\nTesting on test set A ...')
         data_dir = os.path.join(args.dataset_path, 'testA')
         output_dir = os.path.join(results_dir, 'testA')
-        infer(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, data_dir, output_dir, num_workers=args.jobs, device=device)
 
         print('\nTesting on test set B ...')
         data_dir = os.path.join(args.dataset_path, 'testB')
         output_dir = os.path.join(results_dir, 'testB')
-        infer(model, data_dir, output_dir, epoch=ckpt['epoch'], num_workers=args.jobs)
+        infer(model, data_dir, output_dir, num_workers=args.jobs, device=device)
     finally:
-        os.remove('wessup_ckpt.py')
+        rmtree('models_ckpt', ignore_errors=True)
