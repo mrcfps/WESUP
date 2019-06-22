@@ -2,19 +2,19 @@
 Utilities for recording multiple runs of experiments.
 """
 
-import matplotlib
-matplotlib.use('Agg')
-
-import json
-import glob
 import os
-from datetime import datetime
+import glob
+import json
 from shutil import copyfile, copytree, rmtree
+from datetime import datetime
 
+import matplotlib
 import pandas as pd
 import matplotlib.pyplot as plt
 
 import config
+
+matplotlib.use('Agg')
 
 
 def prepare_record_dir():
@@ -68,6 +68,7 @@ def copy_source_files(record_dir):
         copyfile(source_file, os.path.join(source_dir, source_file))
 
     copytree('utils', os.path.join(source_dir, 'utils'))
+    copytree('models', os.path.join(source_dir, 'models'))
 
 
 def plot_learning_curves(history_path):
