@@ -204,7 +204,7 @@ class Wessup(BaseModel):
         for sp_idx in range(sp_maps.max().item() + 1):
             pred[sp_maps == sp_idx] = self._sp_pred[sp_idx]
 
-        return pred.unsqueeze(0)
+        return pred.unsqueeze(0)[..., 1]
 
     def compute_loss(self, pred, target, metrics=None):
         device = pred.device
@@ -245,7 +245,7 @@ class Wessup(BaseModel):
 
     def postprocess(self, pred, target):
         pixel_mask, _ = target
-        return pred.argmax(dim=-1), pixel_mask.argmax(dim=-1)
+        return pred.round().long(), pixel_mask.argmax(dim=-1)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

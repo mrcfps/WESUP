@@ -13,6 +13,18 @@ class WhatsThePointConfig:
     # Input spatial size.
     input_size = (280, 400)
 
+    # learning rate
+    lr = 1e-5
+
+    # momentum for SGD optimizer
+    momentum = 0.9
+
+    # weight decay for optimization
+    weight_decay = 5e-4
+
+    # numerical stability term
+    epsilon = 1e-7
+
 
 config = WhatsThePointConfig()
 
@@ -30,6 +42,8 @@ class WhatsThePoint(BaseModel):
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint['model_state_dict'])
+
+        self.summary()
 
     def get_default_dataset(self, root_dir, train=True):
         if train:
@@ -56,8 +70,8 @@ class WhatsThePoint(BaseModel):
 
         optimizer = torch.optim.SGD([
             {'params': non_biases()},
-            {'params': biases(), 'lr': 2e-5}
-        ], lr=1e-5, momentum=0.9, weight_decay=5e-4)
+            {'params': biases(), 'lr': 2 * config.lr}
+        ], lr=config.lr, momentum=config.momentum, weight_decay=config.weight_decay)
 
         if checkpoint is not None:
             # load previous optimizer states
@@ -74,7 +88,7 @@ class WhatsThePoint(BaseModel):
             return data
 
     def forward(self, x):
-        return self.fcn(x)
+        return self.fcn(x)[:, 1, ...]
 
     def compute_loss(self, pred, target, metrics=None):
         """Compute loss for whats-the-point model.
@@ -91,6 +105,7 @@ class WhatsThePoint(BaseModel):
             loss: sum of image-level, point-level and objectness prior losses
         """
 
+        pred = pred.clamp(min=config.epsilon, max=(1 - config.epsilon))
         _, target_class, point_mask, obj_prior = target
 
         # image-level loss
@@ -101,7 +116,7 @@ class WhatsThePoint(BaseModel):
         # point-level loss
         point_mask = point_mask.float()
         point_loss = (point_mask[..., 0] * -torch.log(1 - pred) +
-                      point_mask[..., 1] * -torch.log(pred)) / point_mask.sum()  # (B,)
+                      point_mask[..., 1] * -torch.log(pred)).sum(dim=(1, 2)) / point_mask.sum()  # (B,)
 
         # objectness prior loss
         obj_loss = torch.mean(obj_prior * -torch.log(pred) +
@@ -111,10 +126,9 @@ class WhatsThePoint(BaseModel):
         return torch.mean(image_loss + point_loss + obj_loss)
 
     def postprocess(self, pred, target):
-        pred = pred.argmax(dim=1)  # (B, H, W)
         if self.training:
             target = target[0]
-        return pred, target.argmax(dim=-1)
+        return pred.round().long(), target.argmax(dim=-1)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

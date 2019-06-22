@@ -21,8 +21,18 @@ class CDWSConfig:
     side_ac_weights = torch.tensor([[2.5, 5, 10]])
     fuse_ac_weight = 10
 
+    # learning rates
+    vgg_lr = 1e-3
+    side_lr = 1e-5
+
+    # weight decay for optimization
+    weight_decay = 5e-4
+
     # Generalized mean parameter
     gmp = 4
+
+    # numerical stability term
+    epsilon = 1e-7
 
 
 config = CDWSConfig()
@@ -99,8 +109,8 @@ class CDWS(BaseModel):
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.Adam([
             {'params': self.vgg.parameters()},
-            {'params': self.side.parameters(), 'lr': 1e-5}
-        ], lr=1e-3, weight_decay=5e-4)
+            {'params': self.side.parameters(), 'lr': config.side_lr}
+        ], lr=config.vgg_lr, weight_decay=config.weight_decay)
 
         if checkpoint is not None:
             # load previous optimizer states
@@ -169,11 +179,13 @@ class CDWS(BaseModel):
         target_area = target_area.unsqueeze(-1)  # (B, 1)
 
         def mil_loss(output):
+            output = output.clamp(min=config.epsilon, max=(1 - config.epsilon))
             image_pred = output.mean(dim=(2, 3)) ** (1 / config.gmp)  # (B, C)
             return target_class * -torch.log(image_pred) + \
                 (1 - target_class) * -torch.log(1 - image_pred)
 
         def ac_loss(output):
+            output = output.clamp(min=config.epsilon, max=(1 - config.epsilon))
             area_pred = output.mean(dim=(2, 3))  # (B, C)
             return target_class * (area_pred - target_area) ** 2
 
