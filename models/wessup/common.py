@@ -1,13 +1,13 @@
 import torch
 
-import config
 from utils import is_empty_tensor
 from utils import empty_tensor
+from .config import config
 
 
 def compute_superpixel_label(mask, segments, sp_idx):
     sp_mask = (mask * (segments == sp_idx).long()).float()
-    return sp_mask.sum(dim=(0, 1)) / (sp_mask.sum() + config.EPSILON)
+    return sp_mask.sum(dim=(0, 1)) / (sp_mask.sum() + config.epsilon)
 
 
 def preprocess_superpixels(segments, mask=None):
@@ -69,7 +69,7 @@ def cross_entropy(y_hat, y_true, class_weights=None):
     device = y_hat.device
 
     # clamp all elements to prevent numerical overflow/underflow
-    y_hat = torch.clamp(y_hat, min=config.EPSILON, max=(1 - config.EPSILON))
+    y_hat = torch.clamp(y_hat, min=config.epsilon, max=(1 - config.epsilon))
 
     # number of samples with labels
     labeled_samples = torch.sum(y_true.sum(dim=1) > 0).float()
