@@ -87,7 +87,7 @@ def predict(model, dataset, batch_size=1, num_workers=4, device='cpu'):
         device: target device
 
     Returns:
-        predictions: model predictions of size (N, H, W)
+        predictions: list of model predictions of size (H, W)
     """
 
     dataloader = torch.utils.data.DataLoader(
@@ -108,8 +108,6 @@ def predict(model, dataset, batch_size=1, num_workers=4, device='cpu'):
 
         pbar.update(data[0].size(0))
 
-    predictions = torch.cat(predictions)
-
     return predictions
 
 
@@ -122,7 +120,7 @@ def resize_pred_to_original_size(predictions, dataset):
     for pred, img_path in tqdm(zip(predictions, dataset.img_paths),
                                total=len(predictions)):
         img = Image.open(img_path)
-        pred = pred.unsqueeze(0).unsqueeze(0).float()
+        pred = pred.unsqueeze(0).float()
         pred = F.interpolate(pred, size=(img.height, img.width))
         results.append(pred.squeeze().cpu().numpy())
 
