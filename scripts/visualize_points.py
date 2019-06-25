@@ -12,9 +12,8 @@ from tqdm import tqdm
 from skimage.io import imread, imsave
 
 COLORS = (
-    (0, 0, 255),
-    (255, 0, 0),
     (0, 255, 0),
+    (255, 0, 0),
 )
 
 if __name__ == '__main__':
@@ -41,7 +40,7 @@ if __name__ == '__main__':
 
         for point in csvreader:
             point = [int(d) for d in point]
-            cv2.circle(img, (point[1], point[0]), args.radius, COLORS[point[2]], -1)
+            cv2.circle(img, (point[0], point[1]), args.radius, COLORS[point[2]], -1)
 
         imsave(osp.join(output_dir, img_name), img)
         csvfile.close()
