@@ -5,15 +5,11 @@ Data loading utilities.
 import csv
 import os.path as osp
 import glob
-import random
-from functools import partial
 
 import numpy as np
 import pandas as pd
 from PIL import Image
-from skimage.transform import resize
-from scipy.ndimage.interpolation import map_coordinates
-from scipy.ndimage.filters import gaussian_filter
+import albumentations as A
 
 import torch
 from torch.utils.data import Dataset
@@ -31,73 +27,6 @@ def _list_images(path):
     for ext in ("jpg", "jpeg", "png", "bmp"):
         images.extend(glob.glob(osp.join(path, f"*.{ext}")))
     return sorted(images)
-
-
-def _transform_multiple_images(*imgs):
-    """Apply identical transformations to multiple PIL images."""
-
-    def rnd(lower_bound, upper_bound):
-        rnd = random.random()
-        return lower_bound + (upper_bound - lower_bound) * rnd
-
-    def elastic_transform(image, alpha, sigma, spline_order=1, mode="nearest", random_state=42):
-        """Elastic deformation of image as described in [Simard2003]_.
-        .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
-        Convolutional Neural Networks applied to Visual Document Analysis", in
-        Proc. of the International Conference on Document Analysis and
-        Recognition, 2003.
-        """
-
-        image = np.array(image)
-
-        # don't apply elastic transformation to point mask
-        if image.sum() / np.prod(image.shape) < 0.5:
-            return Image.fromarray(image)
-
-        np.random.seed(random_state)
-        shape = image.shape[:2]
-
-        dx = gaussian_filter((np.random.rand(*shape) * 2 - 1),
-                             sigma, mode="constant", cval=0) * alpha
-        dy = gaussian_filter((np.random.rand(*shape) * 2 - 1),
-                             sigma, mode="constant", cval=0) * alpha
-
-        x, y = np.meshgrid(
-            np.arange(shape[0]), np.arange(shape[1]), indexing="ij")
-        indices = [np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))]
-
-        if image.ndim == 2:
-            result = map_coordinates(
-                image, indices, order=spline_order, mode=mode
-            ).reshape(shape)
-        else:
-            result = np.empty_like(image)
-            for i in range(image.shape[2]):
-                result[:, :, i] = map_coordinates(
-                    image[:, :, i], indices, order=spline_order, mode=mode
-                ).reshape(shape)
-
-        return Image.fromarray(result)
-
-    transforms = (
-        (1, partial(elastic_transform,
-                    alpha=rnd(0, 1000),
-                    sigma=rnd(20, 50),
-                    random_state=np.random.randint(100))
-         ),
-        (0.5, TF.hflip),
-        (0.5, TF.vflip),
-    )
-
-    for prob, transform in transforms:
-        if random.random() < prob:
-            imgs = [
-                transform(img) if img is not None else None for img in imgs]
-
-    if len(imgs) == 1:
-        return imgs[0]
-
-    return imgs
 
 
 class SegmentationDataset(Dataset):
@@ -153,7 +82,26 @@ class SegmentationDataset(Dataset):
         if mask is not None:
             mask = mask.resize((target_width, target_height), resample=Image.NEAREST)
 
-        return img, mask
+        return np.array(img), np.array(mask)
+
+    def _augment(self, *data):
+        img, mask = data
+
+        transformer = A.Compose([
+            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10,
+                                 val_shift_limit=10, p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.1,
+                                       contrast_limit=0.1, p=1),
+            A.CLAHE(p=0.5),
+            A.ElasticTransform(p=0.5),
+            A.Blur(blur_limit=3, p=0.5),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.ShiftScaleRotate(p=0.8),
+        ])
+        augmented = transformer(image=img, mask=mask)
+
+        return augmented['image'], augmented.get('mask', None)
 
     def _convert_image_and_mask_to_tensor(self, img, mask):
         img = TF.to_tensor(img)
@@ -178,9 +126,7 @@ class SegmentationDataset(Dataset):
         img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
-            # perform data augmentation
-            img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask = _transform_multiple_images(img, mask)
+            img, mask = self._augment(img, mask)
 
         img, mask = self._convert_image_and_mask_to_tensor(img, mask)
 
@@ -215,6 +161,23 @@ class AreaConstraintDataset(SegmentationDataset):
         self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
                                      usecols=['img', 'area'])
 
+    def _augment(self, *data):
+        img, mask = data
+
+        transformer = A.Compose([
+            A.HueSaturationValue(p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.3,
+                                       contrast_limit=0.3, p=1),
+            A.CLAHE(p=0.5),
+            A.ElasticTransform(p=0.5),
+            A.Blur(blur_limit=3, p=0.5),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+        ])
+        augmented = transformer(image=img, mask=mask)
+
+        return augmented['image'], augmented.get('mask', None)
+
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx])
 
@@ -224,9 +187,7 @@ class AreaConstraintDataset(SegmentationDataset):
         img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
-            # perform data augmentation
-            img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, mask = _transform_multiple_images(img, mask)
+            img, mask = self._augment(img, mask)
 
         img, mask = self._convert_image_and_mask_to_tensor(img, mask)
         area = torch.tensor(self.area_info.loc[idx]['area'])
@@ -255,8 +216,33 @@ class PointSupervisionDataset(SegmentationDataset):
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
 
         # path to objectness prior
-        self.obj_prior_paths = sorted(glob.glob(
-            osp.join(root_dir, 'objectness', '*.npy'))) if include_obj_prior else None
+        self.obj_prior_paths = _list_images(
+            osp.join(root_dir, 'objectness')) if include_obj_prior else None
+
+    def _augment(self, *data):
+        img, mask, points = data
+
+        # transforms applied to images and masks
+        appearance_transformer = A.Compose([
+            A.HueSaturationValue(p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.3,
+                                       contrast_limit=0.3, p=1),
+            A.CLAHE(p=0.5),
+            A.Blur(blur_limit=3, p=0.5),
+        ])
+
+        # transforms applied to images, masks and points
+        position_transformer = A.Compose([
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.ShiftScaleRotate(p=1),
+        ], keypoint_params={'format': 'xy'})
+
+        augmented = appearance_transformer(image=img, mask=mask)
+        temp_img, temp_mask = augmented['image'], augmented['mask']
+        augmented = position_transformer(image=temp_img, mask=temp_mask, keypoints=points)
+
+        return augmented['image'], augmented.get('mask', None), augmented.get('keypoints', None)
 
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx])
@@ -268,34 +254,30 @@ class PointSupervisionDataset(SegmentationDataset):
         orig_height, orig_width = img.height, img.width
         img, pixel_mask = self._resize_image_and_mask(img, pixel_mask)
 
-        point_mask = None
-
         # how much we would like to rescale coordinates of each point
         # (the last dimension is target class, which should be kept the same)
         if self.rescale_factor is None:
             rescaler = np.array([
-                [self.target_size[0] / orig_height, self.target_size[1] / orig_width, 1]
+                [self.target_size[1] / orig_width, self.target_size[0] / orig_height, 1]
             ])
         else:
             rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
 
-        if self.point_paths is not None:
-            with open(self.point_paths[idx]) as fp:
-                points = np.array([[int(d) for d in point]
-                                   for point in csv.reader(fp)])
-                points = np.floor(points * rescaler).astype('int')
-
-            # compute point mask
-            point_mask = np.zeros((img.height, img.width, config.N_CLASSES), dtype='uint8')
-            for i, j, class_ in points:
-                point_vec = np.zeros(config.N_CLASSES)
-                point_vec[class_] = 1
-                point_mask[i, j] = point_vec
-            point_mask = Image.fromarray(point_mask)
+        # read points from csv file
+        with open(self.point_paths[idx]) as fp:
+            points = np.array([[int(d) for d in point]
+                               for point in csv.reader(fp)])
+            points = np.floor(points * rescaler).astype('int')
 
         if self.train:
-            img = ColorJitter(0.3, 0.3, 0.3)(img)
-            img, pixel_mask, point_mask = _transform_multiple_images(img, pixel_mask, point_mask)
+            img, pixel_mask, points = self._augment(img, pixel_mask, points)
+
+        point_mask = np.zeros((*img.shape[:2], config.N_CLASSES), dtype='uint8')
+        for x, y, class_ in points:
+            point_vec = np.zeros(config.N_CLASSES)
+            point_vec[class_] = 1
+            point_mask[y, x] = point_vec
+        point_mask = Image.fromarray(point_mask)
 
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
 
@@ -306,10 +288,10 @@ class PointSupervisionDataset(SegmentationDataset):
             point_mask = empty_tensor()
 
         if self.obj_prior_paths is not None:
-            # obj_prior = TF.to_tensor(Image.open(self.obj_prior_paths[idx])).squeeze()
-            obj_prior = np.load(self.obj_prior_paths[idx])
-            obj_prior = resize(obj_prior, self.target_size)
-            obj_prior = torch.Tensor(obj_prior)
+            obj_prior = Image.open(self.obj_prior_paths[idx])
+            obj_prior = obj_prior.resize((self.target_size[1], self.target_size[0]),
+                                         resample=Image.BILINEAR)
+            obj_prior = TF.to_tensor(obj_prior).squeeze()
             return img, pixel_mask, point_mask, obj_prior
 
         return img, pixel_mask, point_mask

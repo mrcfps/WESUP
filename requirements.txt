@@ -3,6 +3,7 @@ scipy
 pandas
 matplotlib
 
+albumentations
 scikit-image
 opencv-python
 Pillow
