@@ -15,13 +15,13 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
                         help='Which model to use')
     parser.add_argument('-c', '--checkpoint', help='Path to checkpoint')
-    parser.add_argument('--no-gpu', action='store_true', default=False,
-                        help='Whether to avoid using gpu')
+    parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
+                        help='Which device to use')
     parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
                         help='Number of CPUs to use for preprocessing')
     args = parser.parse_args()
 
-    device = 'cpu' if args.no_gpu or not torch.cuda.is_available() else 'cuda'
+    device = args.device
     record_dir = os.path.abspath(os.path.join(args.checkpoint, '..', '..'))
     results_dir = os.path.join(record_dir, 'results')
     if not os.path.exists(results_dir):

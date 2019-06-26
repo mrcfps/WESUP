@@ -35,8 +35,8 @@ def build_cli_parser():
                         help='Batch size for inference')
     parser.add_argument('-c', '--checkpoint',
                         help='Path to checkpoint')
-    parser.add_argument('--no-gpu', action='store_true', default=False,
-                        help='Whether to avoid using gpu')
+    parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
+                        help='Which device to use')
     parser.add_argument('-o', '--output', default='predictions',
                         help='Path to store visualization and metrics result')
     parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
@@ -191,7 +191,7 @@ if __name__ == '__main__':
     parser = build_cli_parser()
     args = parser.parse_args()
 
-    device = 'cpu' if args.no_gpu or not torch.cuda.is_available() else 'cuda'
+    device = args.device
     model = prepare_model(args.model, args.checkpoint, device=device)
 
     try:
