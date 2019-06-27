@@ -137,3 +137,6 @@ records
 *.jpe?g
 *.png
 *.csv
+*.npy
+*.mat
+*.ipynb
