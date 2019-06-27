@@ -206,7 +206,7 @@ class CDWS(BaseModel):
         pred = pred.round().long()
         if self.training:
             target = target[0]
-        return pred, target.argmax(dim=-1)
+        return pred, target.argmax(dim=1)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

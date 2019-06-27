@@ -7,16 +7,17 @@ from .config import config
 
 def compute_superpixel_label(mask, segments, sp_idx):
     sp_mask = (mask * (segments == sp_idx).long()).float()
-    return sp_mask.sum(dim=(0, 1)) / (sp_mask.sum() + config.epsilon)
+    return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + config.epsilon)
 
 
 def preprocess_superpixels(segments, mask=None):
     """Segment superpixels of a given image and return segment maps and their labels.`
-    Arguments:
+
+    Args:
         segments: slic segments tensor with shape (H, W)
-        mask (optional): annotation mask tensor with shape (H, W, C). Each pixel is a one-hot
+        mask (optional): annotation mask tensor with shape (C, H, W). Each pixel is a one-hot
             encoded label vector. If this vector is all zeros, then its class is unknown.
-    Returns
+    Returns:
         sp_maps: superpixel maps with shape (n_superpixels, H, W)
         sp_labels: superpixel labels with shape (n_labels, C), only when `mask` is given.
             `n_labels` could be smaller than `n_superpixels` in the case of point supervision,

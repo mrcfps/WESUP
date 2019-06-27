@@ -120,7 +120,7 @@ class Wessup(BaseModel):
             n_segments=int(img.size(-2) * img.size(-1) / config.sp_area),
             compactness=config.sp_compactness,
         )
-        segments = torch.LongTensor(segments).to(img.device).unsqueeze(-1)
+        segments = torch.LongTensor(segments).to(img.device)
 
         pixel_mask = pixel_mask.squeeze()
 
@@ -213,7 +213,7 @@ class Wessup(BaseModel):
 
     def postprocess(self, pred, target):
         pixel_mask, _ = target
-        return pred.round().long(), pixel_mask.argmax(dim=-1)
+        return pred.round().long(), pixel_mask.argmax(dim=1)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

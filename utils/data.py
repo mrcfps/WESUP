@@ -14,7 +14,6 @@ import albumentations as A
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
-from torchvision.transforms import ColorJitter
 
 import config
 from . import empty_tensor
@@ -34,7 +33,7 @@ class SegmentationDataset(Dataset):
 
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
-        - mask: tensor of size (H, W, C) with type long or an empty tensor
+        - mask: tensor of size (C, H, W) with type long or an empty tensor
     """
 
     def __init__(self, root_dir, mode=None, target_size=None,
@@ -108,10 +107,8 @@ class SegmentationDataset(Dataset):
         if mask is not None:
             mask = np.array(mask)
             mask = np.concatenate(
-                [np.expand_dims(mask == i, -1)
-                 for i in range(config.N_CLASSES)],
-                axis=-1,
-            )
+                [np.expand_dims(mask == i, 0)
+                 for i in range(config.N_CLASSES)])
             mask = torch.LongTensor(mask.astype("int64"))
         else:
             mask = empty_tensor()
@@ -150,7 +147,7 @@ class AreaConstraintDataset(SegmentationDataset):
 
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
-        - mask: tensor of size (H, W, C) with type long or an empty tensor
+        - mask: tensor of size (C, H, W) with type long or an empty tensor
         - area: a scalar tensor with type float32 or an empty tensor
     """
 
@@ -200,8 +197,8 @@ class PointSupervisionDataset(SegmentationDataset):
 
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
-        - pixel_mask: pixel-level annotation of size (H, W, C) with type long or an empty tensor
-        - point_mask: point-level annotation of size (H, W, C) with type long or an empty tensor
+        - pixel_mask: pixel-level annotation of size (C, H, W) with type long or an empty tensor
+        - point_mask: point-level annotation of size (C, H, W) with type long or an empty tensor
     """
 
     def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
@@ -266,18 +263,16 @@ class PointSupervisionDataset(SegmentationDataset):
         if self.train:
             img, pixel_mask, points = self._augment(img, pixel_mask, points)
 
-        point_mask = np.zeros((*img.shape[:2], config.N_CLASSES), dtype='uint8')
+        point_mask = np.zeros((config.N_CLASSES, *img.shape[:2]), dtype='uint8')
         for x, y, class_ in points:
             point_vec = np.zeros(config.N_CLASSES)
             point_vec[class_] = 1
-            point_mask[y, x] = point_vec
-        point_mask = Image.fromarray(point_mask)
+            point_mask[:, y, x] = point_vec
 
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
 
         if point_mask is not None:
-            point_mask = np.array(point_mask, dtype="int64")
-            point_mask = torch.LongTensor(point_mask)
+            point_mask = torch.LongTensor(point_mask.astype('int64'))
         else:
             point_mask = empty_tensor()
 
