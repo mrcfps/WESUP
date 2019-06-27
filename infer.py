@@ -12,7 +12,6 @@ from shutil import copytree, rmtree
 import torch
 import torch.nn.functional as F
 
-import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
@@ -29,7 +28,7 @@ warnings.filterwarnings('ignore')
 def build_cli_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
                         help='Which model to use')
     parser.add_argument('-b', '--batch-size', type=int, default=1,
                         help='Batch size for inference')
@@ -68,8 +67,6 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
         model = models.Wessup(checkpoint=checkpoint)
     elif model_type == 'cdws':
         model = models.CDWS(checkpoint=checkpoint)
-    elif model_type == 'wtp':
-        model = models.WhatsThePoint(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 

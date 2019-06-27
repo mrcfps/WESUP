@@ -17,7 +17,6 @@ import torch.optim as optim
 import config
 from models import Wessup
 from models import CDWS
-from models import WhatsThePoint
 from utils import record
 from utils import log
 from utils.metrics import accuracy
@@ -46,14 +45,14 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
                         help='Which model to use')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-b', '--batch-size', type=int, default=1, help='Minibatch size')
     parser.add_argument('-w', '--warmup', type=int, default=0,
                         help='Number of warmup epochs (freeze CNN) before training')
-    parser.add_argument('-j', '--jobs', type=int, default=int(os.cpu_count() / 2),
+    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
                         help='Number of CPUs to use for preparing superpixels')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
@@ -122,8 +121,6 @@ def fit(args):
         model = Wessup(checkpoint=checkpoint)
     elif args.model == 'cdws':
         model = CDWS(checkpoint=checkpoint)
-    elif args.model == 'wtp':
-        model = WhatsThePoint(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {args.model}')
 

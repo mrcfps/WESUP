@@ -202,11 +202,9 @@ class PointSupervisionDataset(SegmentationDataset):
         - img: tensor of size (3, H, W) with type float32
         - pixel_mask: pixel-level annotation of size (H, W, C) with type long or an empty tensor
         - point_mask: point-level annotation of size (H, W, C) with type long or an empty tensor
-        - obj_prior (optional): objectness prior of size (H, W) with type float32
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None,
-                 include_obj_prior=False, train=True):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
         super().__init__(root_dir, 'point', target_size, rescale_factor, train)
 
         # path to point supervision directory
@@ -214,10 +212,6 @@ class PointSupervisionDataset(SegmentationDataset):
 
         # path to point annotation files
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
-
-        # path to objectness prior
-        self.obj_prior_paths = _list_images(
-            osp.join(root_dir, 'objectness')) if include_obj_prior else None
 
     def _augment(self, *data):
         img, mask, points = data
@@ -286,12 +280,5 @@ class PointSupervisionDataset(SegmentationDataset):
             point_mask = torch.LongTensor(point_mask)
         else:
             point_mask = empty_tensor()
-
-        if self.obj_prior_paths is not None:
-            obj_prior = Image.open(self.obj_prior_paths[idx])
-            obj_prior = obj_prior.resize((self.target_size[1], self.target_size[0]),
-                                         resample=Image.BILINEAR)
-            obj_prior = TF.to_tensor(obj_prior).squeeze()
-            return img, pixel_mask, point_mask, obj_prior
 
         return img, pixel_mask, point_mask

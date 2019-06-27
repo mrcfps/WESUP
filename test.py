@@ -12,7 +12,7 @@ from infer import prepare_model, infer
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'wtp'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
                         help='Which model to use')
     parser.add_argument('-c', '--checkpoint', help='Path to checkpoint')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
