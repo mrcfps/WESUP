@@ -79,12 +79,12 @@ class BaseModel(ABC, nn.Module):
         """
 
     @abstractmethod
-    def postprocess(self, pred, target):
+    def postprocess(self, pred, target=None):
         """Postprocess raw prediction and target before calling `evaluate` method.
 
         Args:
             pred: prediction computed from the `forward` step
-            target: target computed from `preprocess` method
+            target: target computed from `preprocess` method (optional)
 
         Returns:
             pred: postprocessed prediction

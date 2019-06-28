@@ -202,11 +202,13 @@ class CDWS(BaseModel):
 
         return torch.mean(side_loss + fuse_loss)
 
-    def postprocess(self, pred, target):
+    def postprocess(self, pred, target=None):
         pred = pred.round().long()
-        if self.training:
-            target = target[0]
-        return pred, target.argmax(dim=1)
+        if target is not None:
+            if self.training:
+                target = target[0]
+            return pred, target.argmax(dim=1)
+        return pred
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""

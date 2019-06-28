@@ -6,6 +6,7 @@ import argparse
 import csv
 import os
 import warnings
+from math import ceil
 from importlib import import_module
 from shutil import copytree, rmtree
 
@@ -16,6 +17,7 @@ from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
 
+from utils.data import SegmentationDataset
 from utils.metrics import accuracy
 from utils.metrics import detection_f1
 from utils.metrics import dice
@@ -30,8 +32,7 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
                         help='Which model to use')
-    parser.add_argument('-b', '--batch-size', type=int, default=1,
-                        help='Batch size for inference')
+    parser.add_argument('--scales', default='0.5', help='Optional multiscale inference')
     parser.add_argument('-c', '--checkpoint',
                         help='Path to checkpoint')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
@@ -73,13 +74,12 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
     return model.to(device).eval()
 
 
-def predict(model, dataset, batch_size=1, num_workers=4, device='cpu'):
+def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
     """Predict on a directory of images.
 
     Arguments:
         model: inference model (should be a `torch.nn.Module`)
         dataset: instance of `torch.utils.data.Dataset`
-        batch_size: mini-batch size for inference
         num_workers: number of workers to load data
         device: target device
 
@@ -87,41 +87,32 @@ def predict(model, dataset, batch_size=1, num_workers=4, device='cpu'):
         predictions: list of model predictions of size (H, W)
     """
 
-    dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, num_workers=num_workers)
+    dataloader = torch.utils.data.DataLoader(dataset, num_workers=num_workers)
 
-    print(f'\nPredicting {len(dataset)} images ...')
-    pbar = tqdm(total=len(dataset))
+    print(f'\nPredicting {len(dataset)} images with scales {scales} ...')
     predictions = []
-    for data in dataloader:
-        data = [datum.to(device) for datum in data]
-        input_, target = model.preprocess(*data)
+    for data in tqdm(dataloader, total=len(dataset)):
+        img = data[0].to(device)
 
-        with torch.no_grad():
-            pred = model(input_)
+        # original spatial size of input image (height, width)
+        orig_size = (img.size(2), img.size(3))
 
-        pred, _ = model.postprocess(pred, target)
-        predictions.append(pred)
+        multiscale_preds = []
+        for scale in scales:
+            target_size = [ceil(size * scale) for size in orig_size]
+            img = F.interpolate(img, size=target_size, mode='bilinear')
+            input_, _ = model.preprocess(img, None)
 
-        pbar.update(data[0].size(0))
+            with torch.no_grad():
+                pred = model(input_)
+
+            pred = model.postprocess(pred).float().unsqueeze(0)
+            pred = F.interpolate(pred, size=orig_size, mode='nearest')
+            multiscale_preds.append(pred)
+
+        predictions.append(torch.cat(multiscale_preds).mean(dim=0).round())
 
     return predictions
-
-
-def resize_pred_to_original_size(predictions, dataset):
-    """Resize each prediction back to its original size."""
-
-    print('\nResizing predictions back to original sizes ...')
-
-    results = []
-    for pred, img_path in tqdm(zip(predictions, dataset.img_paths),
-                               total=len(predictions)):
-        img = Image.open(img_path)
-        pred = pred.unsqueeze(0).float()
-        pred = F.interpolate(pred, size=(img.height, img.width))
-        results.append(pred.squeeze().cpu().numpy())
-
-    return results
 
 
 def save_predictions(predictions, dataset, output_dir='predictions'):
@@ -152,18 +143,17 @@ def report_metrics(metrics):
     print('Mean Object Hausdorff:', metrics['object_hausdorff'])
 
 
-def infer(model, data_dir, output_dir=None, batch_size=1,
-          num_workers=4, device='cpu'):
+def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device='cpu'):
     """Making inference on a directory of images with given model checkpoint."""
 
     if output_dir is not None and not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
-    dataset = model.get_default_dataset(data_dir, train=False)
+    dataset = SegmentationDataset(data_dir, train=False)
 
-    predictions = predict(model, dataset, batch_size=batch_size,
+    predictions = predict(model, dataset, scales=scales,
                           num_workers=num_workers, device=device)
-    predictions = resize_pred_to_original_size(predictions, dataset)
+    predictions = [pred.squeeze().cpu().numpy() for pred in predictions]
 
     if output_dir is not None:
         save_predictions(predictions, dataset, output_dir)
@@ -191,8 +181,10 @@ if __name__ == '__main__':
     device = args.device
     model = prepare_model(args.model, args.checkpoint, device=device)
 
+    scales = tuple(float(s) for s in args.scales.split(','))
+
     try:
-        infer(model, args.dataset_path, output_dir=args.output,
-              batch_size=args.batch_size, num_workers=args.jobs, device=device)
+        infer(model, args.dataset_path, output_dir=args.output, scales=scales,
+              num_workers=args.jobs, device=device)
     finally:
         rmtree('models_ckpt', ignore_errors=True)

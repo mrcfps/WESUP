@@ -27,7 +27,7 @@ def preprocess_superpixels(segments, mask=None):
     # ordering of superpixels
     sp_idx_list = range(segments.max() + 1)
 
-    if not is_empty_tensor(mask):
+    if mask is not None and not is_empty_tensor(mask):
         # compute labels for each superpixel
         sp_labels = torch.cat([
             compute_superpixel_label(mask, segments, sp_idx).unsqueeze(0)
