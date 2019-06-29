@@ -5,6 +5,7 @@ Inference module.
 import argparse
 import csv
 import os
+import os.path as osp
 import warnings
 from math import ceil
 from importlib import import_module
@@ -54,9 +55,9 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
         print(f'Loaded checkpoint from {ckpt_path}.')
 
     # copy models module next to checkpoint directory (if present)
-    models_dir = os.path.join(ckpt_path, '..', '..', 'source', 'models')
+    models_dir = osp.abspath(osp.join(ckpt_path, '..', '..', 'source', 'models'))
     models_path = 'models_ckpt'
-    if os.path.exists(models_dir):
+    if osp.exists(models_dir):
         copytree(models_dir, models_path)
     else:
         # fall back to current models module
@@ -93,6 +94,7 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
     predictions = []
     for data in tqdm(dataloader, total=len(dataset)):
         img = data[0].to(device)
+        mask = data[1].to(device).float()
 
         # original spatial size of input image (height, width)
         orig_size = (img.size(2), img.size(3))
@@ -101,12 +103,14 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
         for scale in scales:
             target_size = [ceil(size * scale) for size in orig_size]
             img = F.interpolate(img, size=target_size, mode='bilinear')
-            input_, _ = model.preprocess(img, None)
+            mask = F.interpolate(mask, size=target_size, mode='nearest')
+            input_, target = model.preprocess(img, mask.long())
 
             with torch.no_grad():
                 pred = model(input_)
 
-            pred = model.postprocess(pred).float().unsqueeze(0)
+            pred, _ = model.postprocess(pred, target)
+            pred = pred.float().unsqueeze(0)
             pred = F.interpolate(pred, size=orig_size, mode='nearest')
             multiscale_preds.append(pred)
 
@@ -126,13 +130,13 @@ def save_predictions(predictions, dataset, output_dir='predictions'):
 
     print(f'\nSaving prediction to {output_dir} ...')
 
-    if not os.path.exists(output_dir):
+    if not osp.exists(output_dir):
         os.mkdir(output_dir)
 
     for pred, img_path in tqdm(zip(predictions, dataset.img_paths), total=len(predictions)):
-        img_name = os.path.basename(img_path)
+        img_name = osp.basename(img_path)
         pred = pred.astype('uint8')
-        Image.fromarray(pred * 255).save(os.path.join(output_dir, img_name))
+        Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
 
 
 def report_metrics(metrics):
@@ -146,7 +150,7 @@ def report_metrics(metrics):
 def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device='cpu'):
     """Making inference on a directory of images with given model checkpoint."""
 
-    if output_dir is not None and not os.path.exists(output_dir):
+    if output_dir is not None and not osp.exists(output_dir):
         os.mkdir(output_dir)
 
     dataset = SegmentationDataset(data_dir, train=False)
@@ -167,7 +171,7 @@ def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device
         report_metrics(metrics)
 
         if output_dir is not None:
-            metrics_path = os.path.join(output_dir, 'metrics.csv')
+            metrics_path = osp.join(output_dir, 'metrics.csv')
             with open(metrics_path, 'w') as fp:
                 writer = csv.writer(fp)
                 writer.writerow(metrics.keys())
