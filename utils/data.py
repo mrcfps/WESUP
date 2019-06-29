@@ -15,7 +15,6 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 
-import config
 from . import empty_tensor
 
 
@@ -37,11 +36,12 @@ class SegmentationDataset(Dataset):
     """
 
     def __init__(self, root_dir, mode=None, target_size=None,
-                 rescale_factor=None, train=True):
+                 rescale_factor=None, train=True, n_classes=2):
         """Initialize a new SegmentationDataset.
 
         Args:
             root_dir: path to dataset root
+            n_classes: number of target classes
             mode: one of `mask`, `area` or `point`
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
@@ -60,6 +60,7 @@ class SegmentationDataset(Dataset):
         self.target_size = target_size
         self.rescale_factor = rescale_factor
         self.train = train
+        self.n_classes = n_classes
 
         self.summary()
 
@@ -108,7 +109,7 @@ class SegmentationDataset(Dataset):
             mask = np.array(mask)
             mask = np.concatenate(
                 [np.expand_dims(mask == i, 0)
-                 for i in range(config.N_CLASSES)])
+                 for i in range(self.n_classes)])
             mask = torch.LongTensor(mask.astype("int64"))
         else:
             mask = empty_tensor()
@@ -263,9 +264,9 @@ class PointSupervisionDataset(SegmentationDataset):
         if self.train:
             img, pixel_mask, points = self._augment(img, pixel_mask, points)
 
-        point_mask = np.zeros((config.N_CLASSES, *img.shape[:2]), dtype='uint8')
+        point_mask = np.zeros((self.n_classes, *img.shape[:2]), dtype='uint8')
         for x, y, class_ in points:
-            point_vec = np.zeros(config.N_CLASSES)
+            point_vec = np.zeros(self.n_classes)
             point_vec[class_] = 1
             point_mask[:, y, x] = point_vec
 

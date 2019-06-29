@@ -21,6 +21,10 @@ class BaseModel(ABC, nn.Module):
     """
 
     @abstractmethod
+    def get_default_config(self):
+        """Get default model configurations."""
+
+    @abstractmethod
     def get_default_dataset(self, root_dir, train=True):
         """Get default dataset for training/validation.
 

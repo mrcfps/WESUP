@@ -12,8 +12,6 @@ import matplotlib
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import config
-
 matplotlib.use('Agg')
 
 
@@ -36,24 +34,18 @@ def prepare_record_dir():
     return record_dir
 
 
-def save_params(record_dir, args):
+def save_params(record_dir, params):
     """Save experiment parameters to record directory."""
 
-    args = vars(args)
     params_dir = os.path.join(record_dir, 'params')
 
     if not os.path.exists(params_dir):
         os.mkdir(params_dir)
 
-    # save all parameters in config.py
-    for cfg_key in dir(config):
-        if not cfg_key.startswith('__'):
-            args[cfg_key.lower()] = getattr(config, cfg_key)
-
     num_of_runs = len([fn for fn in os.listdir(params_dir)])
 
     with open(os.path.join(params_dir, f'{num_of_runs}.json'), 'w') as fp:
-        json.dump(args, fp, indent=4)
+        json.dump(params, fp, indent=4)
 
 
 def copy_source_files(record_dir):

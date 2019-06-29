@@ -14,7 +14,6 @@ from tqdm import tqdm
 import torch
 import torch.optim as optim
 
-import config
 from models import Wessup
 from models import CDWS
 from utils import record
@@ -50,10 +49,10 @@ def build_cli_parser():
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-b', '--batch-size', type=int, default=1, help='Minibatch size')
-    parser.add_argument('-w', '--warmup', type=int, default=0,
-                        help='Number of warmup epochs (freeze CNN) before training')
     parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
-                        help='Number of CPUs to use for preparing superpixels')
+                        help='Number of CPUs to use for data preparation')
+    parser.add_argument('--ckpt-period', type=int, default=10,
+                        help='Period for saving model checkpoint')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
     parser.add_argument('--message', help='Note on this experiment')
@@ -125,6 +124,8 @@ def fit(args):
         raise ValueError(f'Unsupported model: {args.model}')
 
     model = model.to(device)
+    record.save_params(record_dir,
+                       {**vars(args), 'model_config': model.get_default_config()})
 
     ############################# DATA #############################
     global dataloaders
@@ -138,22 +139,6 @@ def fit(args):
             batch_size=1, num_workers=args.jobs
         ),
     }
-
-    ############################# WARMUP #############################
-    if args.warmup > 0 and args.model == 'wessup':
-        # optimize parameters other than the CNN part of wessup
-        parameters = chain(model.fc_layers.parameters(), model.classifier.parameters())
-        optimizer = optim.SGD(
-            parameters,
-            lr=0.005,
-            momentum=config.MOMENTUM,
-            weight_decay=config.WEIGHT_DECAY
-        )
-
-        log('\nWarmup Stage', '=')
-        for epoch in range(1, args.warmup + 1):
-            log('\nWarmup epoch {}/{}'.format(epoch, args.warmup), '-')
-            train_one_epoch(model, optimizer, warmup=True)
 
     ############################# TRAIN #############################
     log('\nTraining Stage', '=')
@@ -176,7 +161,7 @@ def fit(args):
         # save learning curves
         record.plot_learning_curves(tracker.save_path)
 
-        if epoch % config.CHECKPOINT_PERIOD == 0:
+        if epoch % args.ckpt_period == 0:
             # save checkpoints for resuming training
             ckpt_path = os.path.join(
                 record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
@@ -199,7 +184,6 @@ if __name__ == '__main__':
         record.copy_source_files(record_dir)
 
     tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
-    record.save_params(record_dir, args)
 
     try:
         fit(args)

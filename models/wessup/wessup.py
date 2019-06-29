@@ -14,7 +14,9 @@ from ..base import BaseModel
 from .common import cross_entropy
 from .common import preprocess_superpixels
 from .common import label_propagate
-from .config import config
+from .config import WessupConfig
+
+config = WessupConfig()
 
 
 class Wessup(BaseModel):
@@ -90,6 +92,12 @@ class Wessup(BaseModel):
         else:
             self.feature_maps = torch.cat(
                 (self.feature_maps, output.squeeze()))
+
+    def get_default_config(self):
+        return {
+            k: v for k, v in WessupConfig.__dict__.items()
+            if not k.startswith('__')
+        }
 
     def get_default_dataset(self, root_dir, train=True):
         if train:

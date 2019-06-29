@@ -100,6 +100,12 @@ class CDWS(BaseModel):
             layer.weight.data = vgg_layer.weight.data
             layer.bias.data = vgg_layer.bias.data
 
+    def get_default_config(self):
+        return {
+            k: v for k, v in CDWSConfig.__dict__.items()
+            if not k.startswith('__')
+        }
+
     def get_default_dataset(self, root_dir, train=True):
         if train:
             return AreaConstraintDataset(root_dir, target_size=config.input_size)

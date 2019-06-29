@@ -13,8 +13,6 @@ from scipy import stats
 from scipy.spatial.distance import directed_hausdorff
 from skimage.measure import label
 
-import config
-
 
 def convert_to_numpy(func):
     """Decorator for converting each argument to numpy array."""
@@ -48,7 +46,7 @@ def accuracy(P, G):
 
 
 @convert_to_numpy
-def detection_f1(S, G, overlap_threshold=0.5):
+def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
     """F1-score for object detection.
 
     The ground truth for each segmented object is the object in the manual annotation
@@ -66,6 +64,7 @@ def detection_f1(S, G, overlap_threshold=0.5):
         S: segmentation mask with shape (H, W)
         G: ground truth mask with the same shape as S
         overlap_threshold: overlap threshold for counting true positives
+        epsilon: numerical stability term
 
     Returns:
         f1: detection F1 score
@@ -107,15 +106,16 @@ def detection_f1(S, G, overlap_threshold=0.5):
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
 
-    return (2*precision*recall) / (precision + recall + config.EPSILON)
+    return (2*precision*recall) / (precision + recall + epsilon)
 
 
-def dice(S, G):
+def dice(S, G, epsilon=1e-7):
     """Dice index for segmentation evaluation.
 
     Arguments:
         S: segmentation mask with shape (B, H, W)
         G: ground truth mask with shape (B, H, W)
+        epsilon: numerical stability term
 
     Returns:
         dice_score: segmentation dice score
@@ -125,13 +125,13 @@ def dice(S, G):
         S = S.unsqueeze(0) if len(S.size()) == 2 else S
         G = G.unsqueeze(0) if len(G.size()) == 2 else G
         S, G = S.float(), G.float()
-        dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + config.EPSILON)
+        dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + epsilon)
         return dice_score.mean().item()
 
     S, G = np.array(S), np.array(G)
     S = np.expand_dims(S, 0) if len(S.shape) == 2 else S
     G = np.expand_dims(G, 0) if len(G.shape) == 2 else G
-    dice_score = 2 * (G * S).sum(axis=(1, 2)) / (G.sum(axis=(1, 2)) + S.sum(axis=(1, 2)) + config.EPSILON)
+    dice_score = 2 * (G * S).sum(axis=(1, 2)) / (G.sum(axis=(1, 2)) + S.sum(axis=(1, 2)) + epsilon)
     return dice_score.mean()
 
 
