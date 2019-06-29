@@ -3,6 +3,7 @@ from skimage.segmentation import slic
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import models
 
 from utils import empty_tensor
@@ -13,9 +14,6 @@ from ..base import BaseModel
 from .common import cross_entropy
 from .common import preprocess_superpixels
 from .common import label_propagate
-from .extractors import VGGExtractor
-from .extractors import ResNetExtractor
-from .extractors import DenseNetExtractor
 from .config import config
 
 
@@ -31,32 +29,22 @@ class Wessup(BaseModel):
 
         super().__init__()
 
-        if checkpoint is not None:
-            self.backbone_name = checkpoint['backbone']
-        else:
-            self.backbone_name = config.backbone
+        self.backbone = models.vgg16(pretrained=True).features
 
-        try:
-            self.backbone = models.__dict__[self.backbone_name](pretrained=True)
-        except KeyError:
-            raise ValueError(f'unsupported backbone {self.backbone_name}.')
+        # sum of channels of all feature maps
+        self.fm_channels_sum = 0
 
-        # remove classifier (if it's VGG or DenseNet)
-        if hasattr(self.backbone, 'features'):
-            self.backbone = self.backbone.features
-
-        if self.backbone_name.startswith('vgg'):
-            self.extractor = VGGExtractor(self.backbone)
-        elif self.backbone_name.startswith('resnet'):
-            self.extractor = ResNetExtractor(self.backbone)
-        elif self.backbone_name.startswith('densenet'):
-            self.extractor = DenseNetExtractor(self.backbone)
-        else:
-            raise ValueError(f'unsupported backbone {self.backbone_name}.')
+        # side convolution layers after each conv feature map
+        for layer in self.backbone:
+            if isinstance(layer, nn.Conv2d):
+                layer.register_forward_hook(self._hook_fn)
+                setattr(self, f'side_conv{self.fm_channels_sum}',
+                        nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1))
+                self.fm_channels_sum += layer.out_channels // 2
 
         # fully-connected layers for dimensionality reduction
         self.fc_layers = nn.Sequential(
-            nn.Linear(self.extractor.sp_feature_length, 1024),
+            nn.Linear(self.fm_channels_sum, 1024),
             nn.ReLU(),
             nn.Linear(1024, 1024),
             nn.ReLU(),
@@ -70,9 +58,14 @@ class Wessup(BaseModel):
             nn.Softmax()
         )
 
+        # store conv feature maps
+        self.feature_maps = None
+
+        # spatial size of first feature map
+        self.fm_size = None
+
         # label propagation input features
         self.clf_input_features = None
-        self.fc_layers.register_forward_hook(self._hook_fn)
 
         # superpixel predictions (internally tracked to compute loss)
         self._sp_pred = None
@@ -82,8 +75,21 @@ class Wessup(BaseModel):
 
         self.summary()
 
-    def _hook_fn(self, module, input, output):
-        self.clf_input_features = output
+    def _hook_fn(self, _, input_, output):
+        if self.feature_maps is None:
+            self.fm_size = (input_[0].size(2), input_[0].size(3))
+            side_conv_name = 'side_conv0'
+        else:
+            side_conv_name = f'side_conv{len(self.feature_maps)}'
+
+        output = getattr(self, side_conv_name)(output.clone())
+        output = F.interpolate(output, self.fm_size, mode='bilinear')
+
+        if self.feature_maps is None:
+            self.feature_maps = output.squeeze()
+        else:
+            self.feature_maps = torch.cat(
+                (self.feature_maps, output.squeeze()))
 
     def get_default_dataset(self, root_dir, train=True):
         if train:
@@ -104,7 +110,7 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'max', factor=0.5, min_lr=5e-5, verbose=True)
+            optimizer, 'min', factor=0.5, min_lr=1e-7, verbose=True)
 
         return optimizer, scheduler
 
@@ -122,17 +128,16 @@ class Wessup(BaseModel):
         )
         segments = torch.LongTensor(segments).to(img.device)
 
-        pixel_mask = pixel_mask.squeeze()
-
-        if not is_empty_tensor(point_mask):
-            point_mask = point_mask.squeeze()
-            mask = point_mask
+        if point_mask is not None and not is_empty_tensor(point_mask):
+            mask = point_mask.squeeze()
+        elif pixel_mask is not None and not is_empty_tensor(pixel_mask):
+            mask = pixel_mask.squeeze()
         else:
-            mask = pixel_mask
+            mask = None
 
         sp_maps, sp_labels = preprocess_superpixels(segments, mask)
 
-        return (img, sp_maps), (pixel_mask.unsqueeze(0), sp_labels)
+        return (img, sp_maps), (pixel_mask, sp_labels)
 
     def forward(self, x):
         """Running a forward pass.
@@ -149,7 +154,9 @@ class Wessup(BaseModel):
         n_superpixels, height, width = sp_maps.size()
 
         # extract conv feature maps and flatten
-        x = self.extractor.extract(x)
+        _ = self.backbone(x)
+        x = self.feature_maps
+        self.feature_maps = None
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel
@@ -158,6 +165,7 @@ class Wessup(BaseModel):
 
         # reduce superpixel feature dimensions with fully connected layers
         x = self.fc_layers(x)
+        self.clf_input_features = x
 
         # classify each superpixel
         self._sp_pred = self.classifier(x)
@@ -211,15 +219,17 @@ class Wessup(BaseModel):
 
         return loss
 
-    def postprocess(self, pred, target):
-        pixel_mask, _ = target
-        return pred.round().long(), pixel_mask.argmax(dim=1)
+    def postprocess(self, pred, target=None):
+        pred = pred.round().long()
+        if target is not None:
+            pixel_mask, _ = target
+            return pred, pixel_mask.argmax(dim=1)
+        return pred
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint."""
 
         torch.save({
-            'backbone': self.backbone_name,
             'model_state_dict': self.state_dict(),
             **kwargs,
         }, ckpt_path)
@@ -228,7 +238,5 @@ class Wessup(BaseModel):
     def summary(self):
         """Print summary information."""
 
-        print(
-            f'Wessup initialized with {self.backbone_name} backbone '
-            f'({len(self.extractor.conv_layers)} conv layers).')
-        print(f'Superpixel feature length: {self.extractor.sp_feature_length}')
+        print(f'Wessup initialized with VGG16 backbone ')
+        print(f'Superpixel feature length: {self.fm_channels_sum}')
