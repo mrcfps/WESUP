@@ -34,6 +34,10 @@ class Wessup(BaseModel):
 
         self.backbone = models.vgg16(pretrained=True).features
 
+        if config.freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
         # sum of channels of all feature maps
         self.fm_channels_sum = 0
 
@@ -109,7 +113,7 @@ class Wessup(BaseModel):
 
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.SGD(
-            self.parameters(),
+            filter(lambda p: p.requires_grad, self.parameters()),
             lr=1e-3,
             momentum=config.momentum,
             weight_decay=config.weight_decay

@@ -30,6 +30,9 @@ class WessupConfig:
     momentum = 0.9
     weight_decay = 0.001
 
+    # Whether to freeze backbone.
+    freeze_backbone = False
+
     epsilon = 1e-7
 
 
