@@ -35,17 +35,18 @@ class SegmentationDataset(Dataset):
         - mask: tensor of size (C, H, W) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, mode=None, target_size=None,
-                 rescale_factor=None, train=True, n_classes=2):
+    def __init__(self, root_dir, mode=None, target_size=None, rescale_factor=None,
+                 train=True, n_classes=2, multiscale_range=None):
         """Initialize a new SegmentationDataset.
 
         Args:
             root_dir: path to dataset root
-            n_classes: number of target classes
             mode: one of `mask`, `area` or `point`
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
             train: whether in training mode
+            n_classes: number of target classes
+            multiscale_range: a tuple containing the limits of random rescaling
         """
 
         # path to original images
@@ -61,6 +62,7 @@ class SegmentationDataset(Dataset):
         self.rescale_factor = rescale_factor
         self.train = train
         self.n_classes = n_classes
+        self.multiscale_range = multiscale_range
 
         self.summary()
 
@@ -70,6 +72,10 @@ class SegmentationDataset(Dataset):
     def _resize_image_and_mask(self, img, mask=None):
         if self.target_size is not None:
             target_height, target_width = self.target_size
+        elif self.multiscale_range is not None:
+            self.rescale_factor = np.random.uniform(*self.multiscale_range)
+            target_height = int(np.ceil(self.rescale_factor * img.height))
+            target_width = int(np.ceil(self.rescale_factor * img.width))
         elif self.rescale_factor is not None:
             target_height = int(np.ceil(self.rescale_factor * img.height))
             target_width = int(np.ceil(self.rescale_factor * img.width))
@@ -153,7 +159,8 @@ class AreaConstraintDataset(SegmentationDataset):
     """
 
     def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
-        super().__init__(root_dir, 'area', target_size, rescale_factor, train)
+        super().__init__(root_dir, mode='area', target_size=target_size,
+                         rescale_factor=rescale_factor, train=train)
 
         # area information (# foreground pixels divided by total pixels, between 0 and 1)
         self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
@@ -202,8 +209,11 @@ class PointSupervisionDataset(SegmentationDataset):
         - point_mask: point-level annotation of size (C, H, W) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
-        super().__init__(root_dir, 'point', target_size, rescale_factor, train)
+    def __init__(self, root_dir, target_size=None,
+                 rescale_factor=None, train=True, multiscale_range=None):
+        super().__init__(root_dir, mode='point', target_size=target_size,
+                         rescale_factor=rescale_factor, train=train,
+                         multiscale_range=multiscale_range)
 
         # path to point supervision directory
         self.point_root = osp.join(root_dir, f'points')

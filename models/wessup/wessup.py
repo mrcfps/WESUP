@@ -101,7 +101,7 @@ class Wessup(BaseModel):
 
     def get_default_dataset(self, root_dir, train=True):
         if train:
-            return PointSupervisionDataset(root_dir, rescale_factor=config.rescale_factor)
+            return PointSupervisionDataset(root_dir, multiscale_range=config.multiscale_range)
 
         return SegmentationDataset(root_dir, rescale_factor=config.rescale_factor, train=False)
 
@@ -118,7 +118,7 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', factor=0.5, min_lr=1e-7, verbose=True)
+            optimizer, 'max', factor=0.5, min_lr=1e-7, verbose=True)
 
         return optimizer, scheduler
 

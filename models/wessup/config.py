@@ -4,6 +4,9 @@ class WessupConfig:
     # Rescale factor to subsample input images.
     rescale_factor = 0.5
 
+    # mult-scale range for training
+    multiscale_range = (0.4, 0.6)
+
     # Number of target classes.
     n_classes = 2
 

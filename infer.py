@@ -11,12 +11,14 @@ from math import ceil
 from importlib import import_module
 from shutil import copytree, rmtree
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
+from skimage.morphology import opening
 
 from utils.data import SegmentationDataset
 from utils.metrics import accuracy
@@ -114,7 +116,20 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
             pred = F.interpolate(pred, size=orig_size, mode='nearest')
             multiscale_preds.append(pred)
 
-        predictions.append(torch.cat(multiscale_preds).mean(dim=0).round())
+        prediction = torch.cat(multiscale_preds).mean(dim=0).round().squeeze().cpu().numpy()
+
+        # apply morphology postprocessing (i.e. opening)
+        # when performing multiscale inference
+        if len(scales) > 1:
+            def get_selem(size):
+                assert size % 2 == 1
+                selem = np.zeros((size, size))
+                center = int((size + 1) / 2)
+                selem[center, :] = 1
+                selem[:, center] = 1
+                return selem
+            prediction = opening(prediction, selem=get_selem(9))
+        predictions.append(prediction)
 
     return predictions
 
@@ -157,7 +172,6 @@ def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device
 
     predictions = predict(model, dataset, scales=scales,
                           num_workers=num_workers, device=device)
-    predictions = [pred.squeeze().cpu().numpy() for pred in predictions]
 
     if output_dir is not None:
         save_predictions(predictions, dataset, output_dir)
