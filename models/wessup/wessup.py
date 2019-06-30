@@ -1,10 +1,11 @@
+import os.path as osp
 from functools import partial
-from skimage.segmentation import slic
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+from skimage.segmentation import slic
 
 from utils import empty_tensor
 from utils import is_empty_tensor
@@ -101,8 +102,9 @@ class Wessup(BaseModel):
 
     def get_default_dataset(self, root_dir, train=True):
         if train:
-            return PointSupervisionDataset(root_dir, multiscale_range=config.multiscale_range)
-
+            if osp.exists(osp.join(root_dir, 'points')):
+                return PointSupervisionDataset(root_dir, multiscale_range=config.multiscale_range)
+            return SegmentationDataset(root_dir, multiscale_range=config.multiscale_range)
         return SegmentationDataset(root_dir, rescale_factor=config.rescale_factor, train=False)
 
     def get_default_optimizer(self, checkpoint=None):
@@ -123,7 +125,7 @@ class Wessup(BaseModel):
         return optimizer, scheduler
 
     def preprocess(self, *data):
-        if self.training:
+        if len(data) == 3:
             img, pixel_mask, point_mask = data
         else:
             img, pixel_mask = data
@@ -214,16 +216,16 @@ class Wessup(BaseModel):
             loss = ce(self._sp_pred[:labeled_num], sp_labels)
             propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
             loss += config.propagate_weight * propagate_loss
+
+            if metrics is not None and isinstance(metrics, dict):
+                metrics['labeled_sp_ratio'] = labeled_num / total_num
+                metrics['propagated_labels'] = propagated_labels.sum().item()
+                metrics['propagate_loss'] = propagate_loss.item()
         else:  # fully-supervised mode
             loss = ce(self._sp_pred, sp_labels)
 
         # clear outdated superpixel prediction
         self._sp_pred = None
-
-        if metrics is not None and isinstance(metrics, dict):
-            metrics['labeled_sp_ratio'] = labeled_num / total_num
-            metrics['propagated_labels'] = propagated_labels.sum().item()
-            metrics['propagate_loss'] = propagate_loss.item()
 
         return loss
 
