@@ -6,13 +6,11 @@ import argparse
 import os
 import warnings
 from shutil import rmtree
-from itertools import chain
 
 import numpy as np
 from tqdm import tqdm
 
 import torch
-import torch.optim as optim
 
 from models import Wessup
 from models import CDWS
@@ -86,8 +84,8 @@ def train_one_iteration(model, optimizer, phase, *data):
     tracker.step({**metrics, **model.evaluate(pred, target, metric_funcs)})
 
 
-def train_one_epoch(model, optimizer, warmup=False):
-    phases = ['train'] if warmup else ['train', 'val']
+def train_one_epoch(model, optimizer, no_val=False):
+    phases = ['train'] if no_val else ['train', 'val']
     for phase in phases:
         print(f'{phase.capitalize()} phase:')
 
@@ -97,9 +95,6 @@ def train_one_epoch(model, optimizer, warmup=False):
         else:
             model.eval()
             tracker.eval()
-
-        if warmup:
-            model.backbone.eval()
 
         pbar = tqdm(dataloaders[phase])
         for data in pbar:
@@ -133,12 +128,15 @@ def fit(args):
         'train': torch.utils.data.DataLoader(
             model.get_default_dataset(os.path.join(args.dataset_path, 'train')),
             batch_size=args.batch_size, shuffle=True, num_workers=args.jobs
-        ),
-        'val': torch.utils.data.DataLoader(
-            model.get_default_dataset(os.path.join(args.dataset_path, 'val'), train=False),
-            batch_size=1, num_workers=args.jobs
-        ),
+        )
     }
+
+    val_path = os.path.join(args.dataset_path, 'val')
+    if os.path.exists(val_path):
+        dataloaders['val'] = torch.utils.data.DataLoader(
+            model.get_default_dataset(val_path, train=False),
+            batch_size=1, num_workers=args.jobs
+        )
 
     ############################# TRAIN #############################
     log('\nTraining Stage', '=')
@@ -150,10 +148,10 @@ def fit(args):
         log('\nEpoch {}/{}'.format(epoch, total_epochs), '-')
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
-        train_one_epoch(model, optimizer)
+        train_one_epoch(model, optimizer, no_val=(not os.path.exists(val_path)))
 
         if scheduler is not None:
-            scheduler.step(np.mean(tracker.history['val_dice']))
+            scheduler.step(np.mean(tracker.history['loss']))
 
         # save metrics to csv file
         tracker.save()

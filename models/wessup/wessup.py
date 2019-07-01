@@ -124,7 +124,7 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'max', factor=0.5, min_lr=1e-7, verbose=True)
+            optimizer, 'min', patience=5, factor=0.5, min_lr=1e-7, verbose=True)
 
         return optimizer, scheduler
 
@@ -216,7 +216,7 @@ class Wessup(BaseModel):
         if labeled_num < total_num:
             # weakly-supervised mode
             propagated_labels = label_propagate(self.clf_input_features, sp_labels,
-                                                config.propagate_threshold)
+                                                threshold=config.propagate_threshold)
             loss = ce(self._sp_pred[:labeled_num], sp_labels)
             propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
             loss += config.propagate_weight * propagate_loss
