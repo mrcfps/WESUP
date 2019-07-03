@@ -20,9 +20,23 @@ def _sample_within_region(region_mask, class_label, num_samples=1):
     if num_samples == 1:
         x_center, y_center = int(xs.mean().round()), int(ys.mean().round())
 
-        # if the center point is inside the region, return it
-        if region_mask[x_center, y_center]:
-            return np.c_[x_center, y_center, class_label]
+        retry = 0
+        while True:
+            # deviate from the center within a circle within radius 5
+            x = x_center + np.random.randint(-5, 6)
+            y = y_center + np.random.randint(-5, 6)
+
+            # if the center point is inside the region, return it
+            try:
+                if region_mask[x, y]:
+                    return np.c_[x, y, class_label]
+            except IndexError:
+                pass
+            finally:
+                retry += 1
+
+            if retry > 5:
+                break
 
     selected_indexes = np.random.permutation(len(xs))[:num_samples]
     xs, ys = xs[selected_indexes], ys[selected_indexes]
@@ -86,6 +100,9 @@ if __name__ == '__main__':
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(os.path.join(mask_dir, fname)))
         points = _generate_points(mask, point_ratio=args.point_ratio)
+
+        # conform to the xy format
+        points[:, [0, 1]] = points[:, [1, 0]]
 
         with open(os.path.join(label_dir, f'{basename}.csv'), 'w') as fp:
             writer = csv.writer(fp)
