@@ -104,11 +104,13 @@ class Wessup(BaseModel):
             if not k.startswith('__')
         }
 
-    def get_default_dataset(self, root_dir, train=True):
+    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
-                return PointSupervisionDataset(root_dir, multiscale_range=config.multiscale_range)
-            return SegmentationDataset(root_dir, multiscale_range=config.multiscale_range)
+                return PointSupervisionDataset(root_dir, proportion=proportion,
+                                               multiscale_range=config.multiscale_range)
+            return SegmentationDataset(root_dir, proportion=proportion,
+                                       multiscale_range=config.multiscale_range)
         return SegmentationDataset(root_dir, rescale_factor=config.rescale_factor, train=False)
 
     def get_default_optimizer(self, checkpoint=None):

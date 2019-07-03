@@ -25,12 +25,13 @@ class BaseModel(ABC, nn.Module):
         """Get default model configurations."""
 
     @abstractmethod
-    def get_default_dataset(self, root_dir, train=True):
+    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         """Get default dataset for training/validation.
 
         Args:
             root_dir: path to dataset root
             train: whether it is a dataset for training
+            proportion: proportion of data to be used
 
         Returns:
             dataset: a `torch.utils.data.Dataset` instance

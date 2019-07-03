@@ -36,7 +36,7 @@ class SegmentationDataset(Dataset):
     """
 
     def __init__(self, root_dir, mode=None, target_size=None, rescale_factor=None,
-                 train=True, n_classes=2, multiscale_range=None):
+                 train=True, proportion=1, n_classes=2, multiscale_range=None):
         """Initialize a new SegmentationDataset.
 
         Args:
@@ -45,6 +45,7 @@ class SegmentationDataset(Dataset):
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
             train: whether in training mode
+            proportion: proportion of data to be used (between 0 and 1) 
             n_classes: number of target classes
             multiscale_range: a tuple containing the limits of random rescaling
         """
@@ -61,13 +62,21 @@ class SegmentationDataset(Dataset):
         self.target_size = target_size
         self.rescale_factor = rescale_factor
         self.train = train
+        self.proportion = proportion
         self.n_classes = n_classes
         self.multiscale_range = multiscale_range
+
+        # indexes to pick image/mask from
+        self.picked = np.arange(len(self.img_paths))
+        if self.proportion < 1:
+            np.random.shuffle(self.picked)
+            self.picked = self.picked[:len(self)]
+            self.picked.sort()
 
         self.summary()
 
     def __len__(self):
-        return len(self.img_paths)
+        return int(self.proportion * len(self.img_paths))
 
     def _resize_image_and_mask(self, img, mask=None):
         if self.target_size is not None:
@@ -123,6 +132,7 @@ class SegmentationDataset(Dataset):
         return img, mask
 
     def __getitem__(self, idx):
+        idx = self.picked[idx]
         img = Image.open(self.img_paths[idx])
         mask = None
         if self.mask_paths is not None:
@@ -141,7 +151,7 @@ class SegmentationDataset(Dataset):
 
         print(
             f"Segmentation dataset ({'training' if self.train else 'inference'}) "
-            f"initialized with {len(self.img_paths)} images.")
+            f"initialized with {len(self)} images.")
 
         if self.mode is not None:
             print(f"Supervision mode: {self.mode}")
@@ -158,9 +168,10 @@ class AreaConstraintDataset(SegmentationDataset):
         - area: a scalar tensor with type float32 or an empty tensor
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None, train=True):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None,
+                 train=True, proportion=1.0):
         super().__init__(root_dir, mode='area', target_size=target_size,
-                         rescale_factor=rescale_factor, train=train)
+                         rescale_factor=rescale_factor, train=train, proportion=proportion)
 
         # area information (# foreground pixels divided by total pixels, between 0 and 1)
         self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
@@ -184,6 +195,7 @@ class AreaConstraintDataset(SegmentationDataset):
         return augmented['image'], augmented.get('mask', None)
 
     def __getitem__(self, idx):
+        idx = self.picked[idx]
         img = Image.open(self.img_paths[idx])
 
         mask = None
@@ -209,11 +221,11 @@ class PointSupervisionDataset(SegmentationDataset):
         - point_mask: point-level annotation of size (C, H, W) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, target_size=None,
-                 rescale_factor=None, train=True, multiscale_range=None):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None,
+                 train=True, proportion=1, multiscale_range=None):
         super().__init__(root_dir, mode='point', target_size=target_size,
                          rescale_factor=rescale_factor, train=train,
-                         multiscale_range=multiscale_range)
+                         proportion=proportion, multiscale_range=multiscale_range)
 
         # path to point supervision directory
         self.point_root = osp.join(root_dir, f'points')
@@ -247,6 +259,7 @@ class PointSupervisionDataset(SegmentationDataset):
         return augmented['image'], augmented.get('mask', None), augmented.get('keypoints', None)
 
     def __getitem__(self, idx):
+        idx = self.picked[idx]
         img = Image.open(self.img_paths[idx])
 
         pixel_mask = None

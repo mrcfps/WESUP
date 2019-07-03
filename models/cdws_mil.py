@@ -106,9 +106,10 @@ class CDWS(BaseModel):
             if not k.startswith('__')
         }
 
-    def get_default_dataset(self, root_dir, train=True):
+    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
-            return AreaConstraintDataset(root_dir, target_size=config.input_size)
+            return AreaConstraintDataset(root_dir, target_size=config.input_size,
+                                         proportion=proportion)
 
         return SegmentationDataset(root_dir, target_size=config.input_size, train=False)
 

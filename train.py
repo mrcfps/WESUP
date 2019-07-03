@@ -4,6 +4,7 @@ Training module.
 
 import argparse
 import os
+import os.path as osp
 import warnings
 from shutil import rmtree
 
@@ -49,6 +50,8 @@ def build_cli_parser():
     parser.add_argument('-b', '--batch-size', type=int, default=1, help='Minibatch size')
     parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
                         help='Number of CPUs to use for data preparation')
+    parser.add_argument('--proportion', type=float, default=1.0,
+                        help='Proportion of data used for training')
     parser.add_argument('--ckpt-period', type=int, default=10,
                         help='Period for saving model checkpoint')
     parser.add_argument('-r', '--resume-ckpt',
@@ -123,16 +126,18 @@ def fit(args):
                        {**vars(args), 'model_config': model.get_default_config()})
 
     ############################# DATA #############################
+    train_path = osp.join(args.dataset_path, 'train')
+    val_path = osp.join(args.dataset_path, 'val')
+
     global dataloaders
     dataloaders = {
         'train': torch.utils.data.DataLoader(
-            model.get_default_dataset(os.path.join(args.dataset_path, 'train')),
+            model.get_default_dataset(train_path, proportion=args.proportion),
             batch_size=args.batch_size, shuffle=True, num_workers=args.jobs
         )
     }
 
-    val_path = os.path.join(args.dataset_path, 'val')
-    if os.path.exists(val_path):
+    if osp.exists(val_path):
         dataloaders['val'] = torch.utils.data.DataLoader(
             model.get_default_dataset(val_path, train=False),
             batch_size=1, num_workers=args.jobs
@@ -148,7 +153,7 @@ def fit(args):
         log('\nEpoch {}/{}'.format(epoch, total_epochs), '-')
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
-        train_one_epoch(model, optimizer, no_val=(not os.path.exists(val_path)))
+        train_one_epoch(model, optimizer, no_val=(not osp.exists(val_path)))
 
         if scheduler is not None:
             scheduler.step(np.mean(tracker.history['loss']))
@@ -161,7 +166,7 @@ def fit(args):
 
         if epoch % args.ckpt_period == 0:
             # save checkpoints for resuming training
-            ckpt_path = os.path.join(
+            ckpt_path = osp.join(
                 record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
             model.save_checkpoint(ckpt_path, epoch=epoch,
                                   optimizer_state_dict=optimizer.state_dict())
@@ -176,21 +181,15 @@ if __name__ == '__main__':
     device = args.device
 
     if args.resume_ckpt is not None:
-        record_dir = os.path.dirname(os.path.dirname(args.resume_ckpt))
+        record_dir = osp.dirname(osp.dirname(args.resume_ckpt))
     else:
         record_dir = record.prepare_record_dir()
         record.copy_source_files(record_dir)
 
-    tracker = HistoryTracker(os.path.join(record_dir, 'history.csv'))
+    tracker = HistoryTracker(osp.join(record_dir, 'history.csv'))
 
     try:
         fit(args)
-    except KeyboardInterrupt:
-        # stop training via Ctrl+C
-        pass
-    except:
-        rmtree(record_dir, ignore_errors=True)
-        raise
     finally:
         if args.smoke:
             rmtree(record_dir, ignore_errors=True)
