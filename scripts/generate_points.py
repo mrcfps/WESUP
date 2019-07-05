@@ -11,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from skimage.measure import label
+from joblib import Parallel, delayed
 
 
 def _sample_within_region(region_mask, class_label, num_samples=1):
@@ -96,7 +97,8 @@ if __name__ == '__main__':
         os.mkdir(label_dir)
 
     print('Generating point annotation ...')
-    for fname in tqdm(os.listdir(mask_dir)):
+
+    def para_func(fname):
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(os.path.join(mask_dir, fname)))
         points = _generate_points(mask, point_ratio=args.point_ratio)
@@ -107,3 +109,5 @@ if __name__ == '__main__':
         with open(os.path.join(label_dir, f'{basename}.csv'), 'w') as fp:
             writer = csv.writer(fp)
             writer.writerows(points)
+
+    Parallel(n_jobs=os.cpu_count())(delayed(para_func)(fname) for fname in tqdm(os.listdir(mask_dir)))

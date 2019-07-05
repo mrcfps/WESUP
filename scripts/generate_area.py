@@ -7,6 +7,7 @@ import sys
 import os
 
 import pandas as pd
+from tqdm import tqdm
 from skimage.io import imread
 
 
@@ -23,7 +24,8 @@ if __name__ == '__main__':
 
     area_info = pd.DataFrame(columns=['img', 'area'])
 
-    for idx, img_name in enumerate(sorted(os.listdir(mask_dir))):
+    pbar = tqdm(enumerate(sorted(os.listdir(mask_dir))), total=len(os.listdir(mask_dir)))
+    for idx, img_name in pbar:
         img_path = os.path.join(mask_dir, img_name)
         img = imread(img_path)
         area_info.loc[idx] = [img_name, img.mean()]
