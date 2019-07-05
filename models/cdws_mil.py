@@ -15,10 +15,10 @@ class CDWSConfig:
     input_size = (280, 400)
 
     # Fixed fusion weights
-    fusion_weights = torch.tensor([0.2, 0.35, 0.45]).view(1, 3, 1, 1)
+    fusion_weights = (0.2, 0.35, 0.45)
 
     # Weights of area constrains loss
-    side_ac_weights = torch.tensor([[2.5, 5, 10]])
+    side_ac_weights = (2.5, 5, 10)
     fuse_ac_weight = 10
 
     # learning rates
@@ -156,7 +156,7 @@ class CDWS(BaseModel):
         # concatenate side outputs
         self.side_outputs = torch.cat([side1, side2, side3], dim=1)  # (B, 3, H, W)
 
-        fusion_weights = config.fusion_weights.to(x.device).detach()
+        fusion_weights = torch.tensor(config.fusion_weights).view(1, 3, 1, 1).to(x.device)
         self.fused_output = torch.sum(self.side_outputs * fusion_weights,
                                       dim=1, keepdim=True)  # (B, 1, H, W)
 
@@ -198,7 +198,7 @@ class CDWS(BaseModel):
 
         side_mil_loss = mil_loss(self.side_outputs)  # (B, 3)
         side_ac_loss = ac_loss(self.side_outputs)  # (B, 3)
-        side_ac_weights = config.side_ac_weights.to(device).detach()  # (1, 3)
+        side_ac_weights = torch.tensor(config.side_ac_weights).to(device).unsqueeze(0)  # (1, 3)
         side_loss = side_mil_loss + side_ac_weights * side_ac_loss  # (B, 3)
         side_loss = torch.sum(side_loss, dim=1)  # (B,)
 
