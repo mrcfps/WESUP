@@ -35,8 +35,8 @@ def preprocess_superpixels(segments, mask=None):
         ])
 
         # move labeled superpixels to the front of `sp_idx_list`
-        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().squeeze()
-        unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero().squeeze()
+        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().flatten()
+        unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero().flatten()
         sp_idx_list = torch.cat([labeled_sps, unlabeled_sps])
 
         # quantize superpixel labels (e.g., from (0.7, 0.3) to (1.0, 0.0))
