@@ -10,6 +10,7 @@ import os.path as osp
 import cv2
 from tqdm import tqdm
 from skimage.io import imread, imsave
+from skimage.segmentation import mark_boundaries
 from joblib import Parallel, delayed
 
 
@@ -32,6 +33,7 @@ if not osp.exists(output_dir):
     os.mkdir(output_dir)
 
 img_dir = osp.join(osp.dirname(args.point_root), 'images')
+mask_dir = osp.join(osp.dirname(args.point_root), 'masks')
 
 print(f'Generating dot annotation visualizaion to {output_dir} ...')
 
@@ -39,6 +41,16 @@ print(f'Generating dot annotation visualizaion to {output_dir} ...')
 def para_func(img_name):
     basename = osp.splitext(img_name)[0]
     img = imread(osp.join(img_dir, img_name))
+    mask = imread(osp.join(mask_dir, img_name)) if osp.exists(mask_dir) else None
+
+    # handle PNG files with alpha channel
+    if img.shape[-1] == 4:
+        img = img[..., :3]
+
+    # mark boundaries if mask is present
+    if mask is not None:
+        img = (mark_boundaries(img, mask, mode='thick') * 255).astype('uint8')
+
     csvfile = open(osp.join(args.point_root, f'{basename}.csv'))
     csvreader = csv.reader(csvfile)
 
