@@ -8,10 +8,9 @@ import os.path as osp
 import warnings
 from shutil import rmtree
 
+import torch
 import numpy as np
 from tqdm import tqdm
-
-import torch
 
 from models import Wessup
 from models import CDWS
@@ -101,7 +100,10 @@ def train_one_epoch(model, optimizer, no_val=False):
 
         pbar = tqdm(dataloaders[phase])
         for data in pbar:
-            train_one_iteration(model, optimizer, phase, *data)
+            try:
+                train_one_iteration(model, optimizer, phase, *data)
+            except RuntimeError as ex:
+                print(ex)
 
         pbar.write(tracker.log())
         pbar.close()
@@ -156,7 +158,13 @@ def fit(args):
         train_one_epoch(model, optimizer, no_val=(not osp.exists(val_path)))
 
         if scheduler is not None:
-            scheduler.step(np.mean(tracker.history['loss']))
+            labeled_loss = np.mean(tracker.history['loss'])
+
+            # only adjust learning rate according to loss of labeled examples
+            if 'propagate_loss' in tracker.history:
+                labeled_loss -= np.mean(tracker.history['propagate_loss'])
+
+            scheduler.step(labeled_loss)
 
         # save metrics to csv file
         tracker.save()
