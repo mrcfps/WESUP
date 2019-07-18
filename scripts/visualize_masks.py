@@ -31,4 +31,6 @@ if __name__ == "__main__":
         os.mkdir(output_dir)
 
     for mask_path in tqdm(_list_images(mask_root)):
-        imsave(mask_path.replace(mask_root, output_dir), imread(mask_path) * 255)
+        imsave(mask_path.replace(mask_root, output_dir),
+               imread(mask_path) * 255,
+               check_contrast=False)
