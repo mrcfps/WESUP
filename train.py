@@ -125,7 +125,7 @@ def fit(args):
 
     model = model.to(device)
     record.save_params(record_dir,
-                       {**vars(args), 'model_config': model.get_default_config()})
+                       {**vars(args), 'model_config': model.config._to_dict()})
 
     ############################# DATA #############################
     train_path = osp.join(args.dataset_path, 'train')

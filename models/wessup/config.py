@@ -1,4 +1,7 @@
-class WessupConfig:
+from ..base import BasicConfig
+
+
+class WessupConfig(BasicConfig):
     """Configuration for Wessup model."""
 
     # Rescale factor to subsample input images.

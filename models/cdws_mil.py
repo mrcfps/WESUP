@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,14 +7,14 @@ from torchvision.models import vgg16
 
 from utils.data import SegmentationDataset
 from utils.data import AreaConstraintDataset
-from .base import BaseModel
+from .base import BasicConfig, BaseModel
 
 
 class CDWSConfig:
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
-    input_size = (280, 400)
+    input_size = (400, 400)
 
     # Fixed fusion weights
     fusion_weights = (0.2, 0.35, 0.45)
@@ -35,9 +37,6 @@ class CDWSConfig:
     epsilon = 1e-7
 
 
-config = CDWSConfig()
-
-
 class CDWS(BaseModel):
     """
     Constrained deep weak supervision network for histopathology image segmentation.
@@ -46,6 +45,8 @@ class CDWS(BaseModel):
 
     def __init__(self, checkpoint=None):
         super().__init__()
+
+        self.config = CDWSConfig()
 
         self.vgg = nn.ModuleDict({
             # First stage
@@ -82,6 +83,8 @@ class CDWS(BaseModel):
         else:
             self._copy_weights_from_vgg16()
 
+        self.summary()
+
     def _copy_weights_from_vgg16(self):
         conv_layer_table = [
             ('conv1_1', 0),
@@ -100,24 +103,18 @@ class CDWS(BaseModel):
             layer.weight.data = vgg_layer.weight.data
             layer.bias.data = vgg_layer.bias.data
 
-    def get_default_config(self):
-        return {
-            k: v for k, v in CDWSConfig.__dict__.items()
-            if not k.startswith('__')
-        }
-
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
-            return AreaConstraintDataset(root_dir, target_size=config.input_size,
+            return AreaConstraintDataset(root_dir, target_size=self.config.input_size,
                                          proportion=proportion)
 
-        return SegmentationDataset(root_dir, target_size=config.input_size, train=False)
+        return SegmentationDataset(root_dir, target_size=self.config.input_size, train=False)
 
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.Adam([
             {'params': self.vgg.parameters()},
-            {'params': self.side.parameters(), 'lr': config.side_lr}
-        ], lr=config.vgg_lr, weight_decay=config.weight_decay)
+            {'params': self.side.parameters(), 'lr': self.config.side_lr}
+        ], lr=self.config.vgg_lr, weight_decay=self.config.weight_decay)
 
         if checkpoint is not None:
             # load previous optimizer states
@@ -156,7 +153,7 @@ class CDWS(BaseModel):
         # concatenate side outputs
         self.side_outputs = torch.cat([side1, side2, side3], dim=1)  # (B, 3, H, W)
 
-        fusion_weights = torch.tensor(config.fusion_weights).view(1, 3, 1, 1).to(x.device)
+        fusion_weights = torch.tensor(self.config.fusion_weights).view(1, 3, 1, 1).to(x.device)
         self.fused_output = torch.sum(self.side_outputs * fusion_weights,
                                       dim=1, keepdim=True)  # (B, 1, H, W)
 
@@ -186,25 +183,25 @@ class CDWS(BaseModel):
         target_area = target_area.unsqueeze(-1)  # (B, 1)
 
         def mil_loss(output):
-            output = output.clamp(min=config.epsilon, max=(1 - config.epsilon))
-            image_pred = output.mean(dim=(2, 3)) ** (1 / config.gmp)  # (B, C)
+            output = output.clamp(min=self.config.epsilon, max=(1 - self.config.epsilon))
+            image_pred = output.mean(dim=(2, 3)) ** (1 / self.config.gmp)  # (B, C)
             return target_class * -torch.log(image_pred) + \
                 (1 - target_class) * -torch.log(1 - image_pred)
 
         def ac_loss(output):
-            output = output.clamp(min=config.epsilon, max=(1 - config.epsilon))
+            output = output.clamp(min=self.config.epsilon, max=(1 - self.config.epsilon))
             area_pred = output.mean(dim=(2, 3))  # (B, C)
             return target_class * (area_pred - target_area) ** 2
 
         side_mil_loss = mil_loss(self.side_outputs)  # (B, 3)
         side_ac_loss = ac_loss(self.side_outputs)  # (B, 3)
-        side_ac_weights = torch.tensor(config.side_ac_weights).to(device).unsqueeze(0)  # (1, 3)
+        side_ac_weights = torch.tensor(self.config.side_ac_weights).to(device).unsqueeze(0)  # (1, 3)
         side_loss = side_mil_loss + side_ac_weights * side_ac_loss  # (B, 3)
         side_loss = torch.sum(side_loss, dim=1)  # (B,)
 
         fuse_mil_loss = mil_loss(self.fused_output)  # (B, 1)
         fuse_ac_loss = ac_loss(self.fused_output)  # (B, 1)
-        fuse_loss = fuse_mil_loss + config.fuse_ac_weight * fuse_ac_loss  # (B, 1)
+        fuse_loss = fuse_mil_loss + self.config.fuse_ac_weight * fuse_ac_loss  # (B, 1)
         fuse_loss = fuse_loss.squeeze()  # (B,)
 
         return torch.mean(side_loss + fuse_loss)
@@ -225,3 +222,10 @@ class CDWS(BaseModel):
             **kwargs,
         }, ckpt_path)
         print(f'Checkpoint saved to {ckpt_path}.')
+
+    def summary(self):
+        print('CDWS-MIL initialized.\n')
+        print('-' * os.environ.get('COLUMNS', 80))
+        print('\n'.join(f'{attr:<32s}{getattr(self.config, attr)}'
+                        for attr in dir(self.config) if not attr.startswith('__')))
+        print('-' * os.environ.get('COLUMNS', 80))

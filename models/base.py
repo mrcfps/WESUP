@@ -6,6 +6,20 @@ import numpy as np
 from tqdm import tqdm
 
 
+class BasicConfig:
+    """A base model configuration class."""
+
+    def __str__(self):
+        return '\n'.join(f'{attr:<32s}{getattr(self, attr)}'
+                         for attr in dir(self) if not attr.startswith('_'))
+
+    def _to_dict(self):
+        return {
+            attr: getattr(self, attr) for attr in dir(self)
+            if not attr.startswith('_')
+        }
+
+
 class BaseModel(ABC, nn.Module):
     """A base model class.
 

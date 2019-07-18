@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 from functools import partial
 
@@ -15,9 +16,7 @@ from ..base import BaseModel
 from .common import cross_entropy
 from .common import preprocess_superpixels
 from .common import label_propagate
-from .config import WessupConfig
-
-config = WessupConfig()
+from .config import config
 
 
 class Wessup(BaseModel):
@@ -32,9 +31,10 @@ class Wessup(BaseModel):
 
         super().__init__()
 
+        self.config = config
         self.backbone = models.vgg16(pretrained=True).features
 
-        if config.freeze_backbone:
+        if self.config.freeze_backbone:
             for param in self.backbone.parameters():
                 param.requires_grad = False
 
@@ -100,7 +100,7 @@ class Wessup(BaseModel):
 
     def get_default_config(self):
         return {
-            k: v for k, v in WessupConfig.__dict__.items()
+            k: v for k, v in self.config.__dict__.items()
             if not k.startswith('__')
         }
 
@@ -108,17 +108,17 @@ class Wessup(BaseModel):
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
                 return PointSupervisionDataset(root_dir, proportion=proportion,
-                                               multiscale_range=config.multiscale_range)
+                                               multiscale_range=self.config.multiscale_range)
             return SegmentationDataset(root_dir, proportion=proportion,
-                                       multiscale_range=config.multiscale_range)
-        return SegmentationDataset(root_dir, rescale_factor=config.rescale_factor, train=False)
+                                       multiscale_range=self.config.multiscale_range)
+        return SegmentationDataset(root_dir, rescale_factor=self.config.rescale_factor, train=False)
 
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.parameters()),
             lr=1e-3,
-            momentum=config.momentum,
-            weight_decay=config.weight_decay
+            momentum=self.config.momentum,
+            weight_decay=self.config.weight_decay
         )
 
         if checkpoint is not None:
@@ -126,7 +126,7 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=5, factor=0.5, min_lr=1e-7, verbose=True)
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
@@ -139,8 +139,8 @@ class Wessup(BaseModel):
 
         segments = slic(
             img.squeeze().cpu().numpy().transpose(1, 2, 0),
-            n_segments=int(img.size(-2) * img.size(-1) / config.sp_area),
-            compactness=config.sp_compactness,
+            n_segments=int(img.size(-2) * img.size(-1) / self.config.sp_area),
+            compactness=self.config.sp_compactness,
         )
         segments = torch.LongTensor(segments).to(img.device)
 
@@ -213,15 +213,15 @@ class Wessup(BaseModel):
 
         # weighted cross entropy
         ce = partial(cross_entropy,
-                     class_weights=torch.Tensor(config.class_weights).to(device))
+                     class_weights=torch.Tensor(self.config.class_weights).to(device))
 
         if labeled_num < total_num:
             # weakly-supervised mode
             propagated_labels = label_propagate(self.clf_input_features, sp_labels,
-                                                threshold=config.propagate_threshold)
+                                                threshold=self.config.propagate_threshold)
             loss = ce(self._sp_pred[:labeled_num], sp_labels)
             propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
-            loss += config.propagate_weight * propagate_loss
+            loss += self.config.propagate_weight * propagate_loss
 
             if metrics is not None and isinstance(metrics, dict):
                 metrics['labeled_sp_ratio'] = labeled_num / total_num
@@ -254,5 +254,7 @@ class Wessup(BaseModel):
     def summary(self):
         """Print summary information."""
 
-        print(f'Wessup initialized with VGG16 backbone ')
-        print(f'Superpixel feature length: {self.fm_channels_sum}')
+        print(f'Wessup initialized.')
+        print('-' * os.environ.get('COLUMNS', 80))
+        print(self.config)
+        print('-' * os.environ.get('COLUMNS', 80))
