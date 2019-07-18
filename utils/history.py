@@ -5,6 +5,8 @@ from collections import defaultdict
 
 import pandas as pd
 
+from . import log
+
 
 class HistoryTracker:
     def __init__(self, save_path=None):
@@ -64,8 +66,7 @@ class HistoryTracker:
         """
 
         df = pd.read_csv(self.save_path)
-        print('\nTraining Summary')
-        print('=' * 20)
+        log('\nTraining Summary', style='=')
 
         for key in df.keys():
             if key not in ['lr', 'loss', 'val_loss']:
