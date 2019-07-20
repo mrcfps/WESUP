@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-class BasicConfig:
+class BaseConfig:
     """A base model configuration class."""
 
     def __str__(self):
@@ -35,10 +35,6 @@ class BaseModel(ABC, nn.Module):
     """
 
     @abstractmethod
-    def get_default_config(self):
-        """Get default model configurations."""
-
-    @abstractmethod
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         """Get default dataset for training/validation.
 
@@ -64,11 +60,12 @@ class BaseModel(ABC, nn.Module):
         """
 
     @abstractmethod
-    def preprocess(self, *data):
+    def preprocess(self, *data, device='cpu'):
         """Preprocess data from dataloaders and return model inputs and targets.
 
         Args:
             *data: data returned from dataloaders
+            device: target device
 
         Returns:
             input: input to feed into the model of size (B, H, W)

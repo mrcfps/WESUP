@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from models import Wessup
 from models import CDWS
+from models import SizeLoss
 from utils import record
 from utils import log
 from utils.metrics import accuracy
@@ -42,7 +43,7 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
+    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'sizeloss'],
                         help='Which model to use')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
@@ -63,8 +64,7 @@ def build_cli_parser():
 
 
 def train_one_iteration(model, optimizer, phase, *data):
-    data = [datum.to(device) for datum in data]
-    input_, target = model.preprocess(*data)
+    input_, target = model.preprocess(*data, device=device)
 
     optimizer.zero_grad()
     metrics = dict()
@@ -100,10 +100,11 @@ def train_one_epoch(model, optimizer, no_val=False):
 
         pbar = tqdm(dataloaders[phase])
         for data in pbar:
-            try:
-                train_one_iteration(model, optimizer, phase, *data)
-            except RuntimeError as ex:
-                print(ex)
+            train_one_iteration(model, optimizer, phase, *data)
+            # try:
+            #     train_one_iteration(model, optimizer, phase, *data)
+            # except RuntimeError as ex:
+            #     print(ex)
 
         pbar.write(tracker.log())
         pbar.close()
@@ -120,6 +121,8 @@ def fit(args):
         model = Wessup(checkpoint=checkpoint)
     elif args.model == 'cdws':
         model = CDWS(checkpoint=checkpoint)
+    elif args.model == 'sizeloss':
+        model = SizeLoss(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {args.model}')
 

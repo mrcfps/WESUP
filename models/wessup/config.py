@@ -1,14 +1,14 @@
-from ..base import BasicConfig
+from ..base import BaseConfig
 
 
-class WessupConfig(BasicConfig):
+class WessupConfig(BaseConfig):
     """Configuration for Wessup model."""
 
     # Rescale factor to subsample input images.
-    rescale_factor = 0.5
+    rescale_factor = 0.25
 
     # mult-scale range for training
-    multiscale_range = (0.4, 0.6)
+    multiscale_range = (0.2, 0.25)
 
     # Number of target classes.
     n_classes = 2

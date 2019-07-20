@@ -98,12 +98,6 @@ class Wessup(BaseModel):
             self.feature_maps = torch.cat(
                 (self.feature_maps, output.squeeze()))
 
-    def get_default_config(self):
-        return {
-            k: v for k, v in self.config.__dict__.items()
-            if not k.startswith('__')
-        }
-
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
@@ -126,11 +120,12 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=5, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
     def preprocess(self, *data):
+        data = [datum.to(device) for datum in data]
         if len(data) == 3:
             img, pixel_mask, point_mask = data
         else:

@@ -6,6 +6,7 @@ import csv
 import os.path as osp
 import glob
 
+import cv2
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -36,7 +37,7 @@ class SegmentationDataset(Dataset):
     """
 
     def __init__(self, root_dir, mode=None, target_size=None, rescale_factor=None,
-                 train=True, proportion=1, n_classes=2, multiscale_range=None):
+                 multiscale_range=None, train=True, proportion=1, n_classes=2, seed=0):
         """Initialize a new SegmentationDataset.
 
         Args:
@@ -44,10 +45,11 @@ class SegmentationDataset(Dataset):
             mode: one of `mask`, `area` or `point`
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
+            multiscale_range: a tuple containing the limits of random rescaling
             train: whether in training mode
             proportion: proportion of data to be used (between 0 and 1) 
             n_classes: number of target classes
-            multiscale_range: a tuple containing the limits of random rescaling
+            seed: random seed
         """
 
         # path to original images
@@ -69,6 +71,7 @@ class SegmentationDataset(Dataset):
         # indexes to pick image/mask from
         self.picked = np.arange(len(self.img_paths))
         if self.proportion < 1:
+            np.random.seed(seed)
             np.random.shuffle(self.picked)
             self.picked = self.picked[:len(self)]
             self.picked.sort()
@@ -165,17 +168,38 @@ class AreaConstraintDataset(SegmentationDataset):
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
         - mask: tensor of size (C, H, W) with type long or an empty tensor
-        - area: a scalar tensor with type float32 or an empty tensor
+        - area: a 2-element (lower and upper bound) vector tensor with type float32
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None,
-                 train=True, proportion=1.0):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None, area_type='decimal',
+                 constraint='equality', margin=0.1, train=True, proportion=1.0):
+        """Construct a new AreaConstraintDataset instance.
+
+        Args:
+            root_dir: path to dataset root
+            target_size: desired output spatial size
+            rescale_factor: multiplier for spatial size
+            area_type: either 'decimal' (relative size) or 'integer' (total number of positive pixels)
+            constraint: either 'equality' (equality area constraint), 'common' (inequality
+                common bound constraint) or 'individual' (inequality individual bound constraint)
+            margin: soft margin of inequality constraint, only relevant when `constraint` is
+                set to 'individual'
+            train: whether in training mode
+            proportion: proportion of data to be used (between 0 and 1)
+
+        Returns:
+            dataset: a new AreaConstraintDataset instance
+        """
         super().__init__(root_dir, mode='area', target_size=target_size,
                          rescale_factor=rescale_factor, train=train, proportion=proportion)
 
         # area information (# foreground pixels divided by total pixels, between 0 and 1)
         self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
                                      usecols=['img', 'area'])
+
+        self.area_type = area_type
+        self.constraint = constraint
+        self.margin = margin
 
     def _augment(self, *data):
         img, mask = data
@@ -207,7 +231,23 @@ class AreaConstraintDataset(SegmentationDataset):
             img, mask = self._augment(img, mask)
 
         img, mask = self._convert_image_and_mask_to_tensor(img, mask)
-        area = torch.tensor(self.area_info.loc[idx]['area'])
+
+        if self.area_type == 'decimal':
+            area = self.area_info.loc[idx]['area']
+        else:  # integer
+            area = mask[1].sum()
+
+        if self.constraint == 'equality':
+            area = torch.tensor([area, area])
+        elif self.constraint == 'individual':
+            area = torch.tensor([area * (1 - self.margin), area * (1 + self.margin)])
+        else:  # common
+            lower = self.area_info.area.min()
+            upper = self.area_info.area.max()
+            if self.area_type == 'integer':
+                lower = int(lower * np.prod(self.target_size))
+                upper = int(upper * np.prod(self.target_size))
+            area = torch.tensor([lower, upper])
 
         return img, mask, area
 
@@ -222,7 +262,7 @@ class PointSupervisionDataset(SegmentationDataset):
     """
 
     def __init__(self, root_dir, target_size=None, rescale_factor=None,
-                 train=True, proportion=1, multiscale_range=None):
+                 multiscale_range=None, radius=0, train=True, proportion=1):
         super().__init__(root_dir, mode='point', target_size=target_size,
                          rescale_factor=rescale_factor, train=train,
                          proportion=proportion, multiscale_range=multiscale_range)
@@ -232,6 +272,8 @@ class PointSupervisionDataset(SegmentationDataset):
 
         # path to point annotation files
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
+
+        self.radius = radius
 
     def _augment(self, *data):
         img, mask, points = data
@@ -289,9 +331,7 @@ class PointSupervisionDataset(SegmentationDataset):
 
         point_mask = np.zeros((self.n_classes, *img.shape[:2]), dtype='uint8')
         for x, y, class_ in points:
-            point_vec = np.zeros(self.n_classes)
-            point_vec[class_] = 1
-            point_mask[:, y, x] = point_vec
+            cv2.circle(point_mask[class_], (x, y), self.radius, 1, -1)
 
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
 
@@ -301,3 +341,15 @@ class PointSupervisionDataset(SegmentationDataset):
             point_mask = empty_tensor()
 
         return img, pixel_mask, point_mask
+
+
+class CompoundDataset(Dataset):
+
+    def __init__(self, *datasets):
+        self.datasets = datasets
+
+    def __len__(self):
+        return len(self.datasets[0])
+
+    def __getitem__(self, idx):
+        return tuple(dataset[idx] for dataset in self.datasets)

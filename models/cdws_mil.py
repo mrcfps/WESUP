@@ -7,10 +7,10 @@ from torchvision.models import vgg16
 
 from utils.data import SegmentationDataset
 from utils.data import AreaConstraintDataset
-from .base import BasicConfig, BaseModel
+from .base import BaseConfig, BaseModel
 
 
-class CDWSConfig:
+class CDWSConfig(BaseConfig):
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
@@ -122,9 +122,11 @@ class CDWS(BaseModel):
 
         return optimizer, None
 
-    def preprocess(self, *data):
+    def preprocess(self, *data, device='cpu'):
+        data = [datum.to(device) for datum in data]
         if self.training:
             img, mask, area = data
+            area = area[..., 0]
             target_class = (area > 0).float()
             return img, (mask, target_class, area)
         else:
@@ -226,6 +228,5 @@ class CDWS(BaseModel):
     def summary(self):
         print('CDWS-MIL initialized.\n')
         print('-' * os.environ.get('COLUMNS', 80))
-        print('\n'.join(f'{attr:<32s}{getattr(self.config, attr)}'
-                        for attr in dir(self.config) if not attr.startswith('__')))
+        print(self.config)
         print('-' * os.environ.get('COLUMNS', 80))
