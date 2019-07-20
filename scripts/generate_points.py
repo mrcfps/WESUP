@@ -10,11 +10,35 @@ import sys
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
+from skimage.measure import label
 from joblib import Parallel, delayed
 
 
 def _sample_within_region(region_mask, class_label, num_samples=1):
+
     xs, ys = np.where(region_mask)
+
+    if num_samples == 1:
+        x_center, y_center = int(xs.mean().round()), int(ys.mean().round())
+
+        retry = 0
+        while True:
+            # deviate from the center within a circle within radius 5
+            x = x_center + np.random.randint(-5, 6)
+            y = y_center + np.random.randint(-5, 6)
+
+            # if the center point is inside the region, return it
+            try:
+                if region_mask[x, y]:
+                    return np.c_[x, y, class_label]
+            except IndexError:
+                pass
+            finally:
+                retry += 1
+
+            if retry > 5:
+                break
+
     selected_indexes = np.random.permutation(len(xs))[:num_samples]
     xs, ys = xs[selected_indexes], ys[selected_indexes]
 
@@ -28,12 +52,28 @@ def _generate_points(mask, point_ratio=1e-4):
     # (from 0 to n_classes, where 0 is background)
     for class_label in np.unique(mask):
         class_mask = mask == class_label
-        points.append(
-            _sample_within_region(
-                class_mask, class_label,
-                num_samples=max(int(class_mask.sum() * point_ratio), 1)
+        if class_label == 0:
+            # if background, randomly sample some points
+            points.append(
+                _sample_within_region(
+                    class_mask, class_label,
+                    num_samples=int(class_mask.sum() * point_ratio)
+                )
             )
-        )
+        else:
+            class_mask = label(class_mask)
+            region_indexes = np.unique(class_mask)
+            region_indexes = region_indexes[np.nonzero(region_indexes)]
+
+            # iterate over all instances of this class
+            for idx in np.unique(region_indexes):
+                region_mask = class_mask == idx
+                num_samples = max(1, int(region_mask.sum() * point_ratio))
+                points.append(
+                    _sample_within_region(
+                        region_mask, class_label, num_samples=num_samples
+                    )
+                )
 
     return np.concatenate(points)
 
@@ -70,4 +110,8 @@ if __name__ == '__main__':
             writer = csv.writer(fp)
             writer.writerows(points)
 
-    Parallel(n_jobs=os.cpu_count())(delayed(para_func)(fname) for fname in tqdm(os.listdir(mask_dir)))
+        return len(points)
+
+    executor = Parallel(n_jobs=os.cpu_count())
+    points_nums = executor(delayed(para_func)(fname) for fname in tqdm(os.listdir(mask_dir)))
+    print(f'Average number of points: {np.mean(points_nums)}.')
