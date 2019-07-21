@@ -3,7 +3,6 @@ Inference module.
 """
 
 import argparse
-import csv
 import os
 import os.path as osp
 import warnings
@@ -17,15 +16,9 @@ import torch.nn.functional as F
 
 from tqdm import tqdm
 from PIL import Image
-from skimage.io import imread
 from skimage.morphology import opening
 
 from utils.data import SegmentationDataset
-from utils.metrics import accuracy
-from utils.metrics import detection_f1
-from utils.metrics import dice
-from utils.metrics import object_dice
-from utils.metrics import object_hausdorff
 
 warnings.filterwarnings('ignore')
 
@@ -60,6 +53,8 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
     models_dir = osp.abspath(osp.join(ckpt_path, '..', '..', 'source', 'models'))
     models_path = 'models_ckpt'
     if osp.exists(models_dir):
+        if osp.exists(models_path):
+            rmtree(models_path)
         copytree(models_dir, models_path)
     else:
         # fall back to current models module
@@ -106,7 +101,7 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
             target_size = [ceil(size * scale) for size in orig_size]
             img = F.interpolate(img, size=target_size, mode='bilinear')
             mask = F.interpolate(mask, size=target_size, mode='nearest')
-            input_, target = model.preprocess(img, mask.long())
+            input_, target = model.preprocess(img, mask.long(), device=device)
 
             with torch.no_grad():
                 pred = model(input_)
@@ -154,14 +149,6 @@ def save_predictions(predictions, dataset, output_dir='predictions'):
         Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
 
 
-def report_metrics(metrics):
-    print('Mean Overall Accuracy:', metrics['accuracy'])
-    print('Mean Dice:', metrics['dice'])
-    print('Mean Detection F1:', metrics['detection_f1'])
-    print('Mean Object Dice:', metrics['object_dice'])
-    print('Mean Object Hausdorff:', metrics['object_hausdorff'])
-
-
 def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device='cpu'):
     """Making inference on a directory of images with given model checkpoint."""
 
@@ -176,32 +163,17 @@ def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device
     if output_dir is not None:
         save_predictions(predictions, dataset, output_dir)
 
-    if dataset.mask_paths is not None:
-        targets = [imread(mask_path) for mask_path in dataset.mask_paths]
-        metric_funcs = [accuracy, dice, detection_f1, object_dice, object_hausdorff]
-
-        print('\nComputing metrics ...')
-        metrics = model.evaluate(predictions, targets, metric_funcs, verbose=True)
-        report_metrics(metrics)
-
-        if output_dir is not None:
-            metrics_path = osp.join(output_dir, 'metrics.csv')
-            with open(metrics_path, 'w') as fp:
-                writer = csv.writer(fp)
-                writer.writerow(metrics.keys())
-                writer.writerow(metrics.values())
-
 
 if __name__ == '__main__':
     parser = build_cli_parser()
-    args = parser.parse_args()
-
-    device = args.device
-    model = prepare_model(args.model, args.checkpoint, device=device)
-
-    scales = tuple(float(s) for s in args.scales.split(','))
 
     try:
+        args = parser.parse_args()
+
+        device = args.device
+        scales = tuple(float(s) for s in args.scales.split(','))
+        model = prepare_model(args.model, args.checkpoint, device=device)
+
         infer(model, args.dataset_path, output_dir=args.output, scales=scales,
               num_workers=args.jobs, device=device)
     finally:

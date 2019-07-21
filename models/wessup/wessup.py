@@ -120,11 +120,11 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=5, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
-    def preprocess(self, *data):
+    def preprocess(self, *data, device='cpu'):
         data = [datum.to(device) for datum in data]
         if len(data) == 3:
             img, pixel_mask, point_mask = data
