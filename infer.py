@@ -26,11 +26,12 @@ warnings.filterwarnings('ignore')
 def build_cli_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws'],
+    parser.add_argument('-m', '--model', default='wessup',
                         help='Which model to use')
-    parser.add_argument('--scales', default='0.5', help='Optional multiscale inference')
-    parser.add_argument('-c', '--checkpoint',
+    parser.add_argument('-c', '--checkpoint', required=True,
                         help='Path to checkpoint')
+    parser.add_argument('--input-size', help='Input size for model')
+    parser.add_argument('--scales', default='0.5', help='Optional multiscale inference')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
     parser.add_argument('-o', '--output', default='predictions',
@@ -61,23 +62,41 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
         models_path = 'models'
 
     models = import_module(models_path)
-
-    if model_type == 'wessup':
+    if hasattr(models, 'initialize_model'):
+        model = models.initialize_model(model_type, checkpoint=checkpoint)
+    elif model_type == 'wessup':
         model = models.Wessup(checkpoint=checkpoint)
     elif model_type == 'cdws':
         model = models.CDWS(checkpoint=checkpoint)
+    elif model_type == 'sizeloss':
+        model = models.SizeLoss(checkpoint=checkpoint)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 
     return model.to(device).eval()
 
 
-def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
+def predict_single_image(model, img, mask, input_size, output_size, device='cpu'):
+    input_, target = model.preprocess(img, mask.long(), device=device)
+
+    with torch.no_grad():
+        pred = model(input_)
+
+    pred, _ = model.postprocess(pred, target)
+    pred = pred.float().unsqueeze(0)
+    pred = F.interpolate(pred, size=output_size, mode='nearest')
+
+    return pred
+
+
+def predict(model, dataset, input_size=None, scales=(0.5,), num_workers=4, device='cpu'):
     """Predict on a directory of images.
 
     Arguments:
         model: inference model (should be a `torch.nn.Module`)
         dataset: instance of `torch.utils.data.Dataset`
+        input_size: spatial size of input image
+        scales: rescale factors for multi-scale inference
         num_workers: number of workers to load data
         device: target device
 
@@ -87,7 +106,9 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
 
     dataloader = torch.utils.data.DataLoader(dataset, num_workers=num_workers)
 
-    print(f'\nPredicting {len(dataset)} images with scales {scales} ...')
+    size_info = f'input size {input_size}' if input_size else f'scales {scales}'
+    print(f'\nPredicting {len(dataset)} images with scales {size_info} ...')
+
     predictions = []
     for data in tqdm(dataloader, total=len(dataset)):
         img = data[0].to(device)
@@ -96,22 +117,22 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
         # original spatial size of input image (height, width)
         orig_size = (img.size(2), img.size(3))
 
-        multiscale_preds = []
-        for scale in scales:
-            target_size = [ceil(size * scale) for size in orig_size]
-            img = F.interpolate(img, size=target_size, mode='bilinear')
-            mask = F.interpolate(mask, size=target_size, mode='nearest')
-            input_, target = model.preprocess(img, mask.long(), device=device)
+        if input_size is not None:
+            img = F.interpolate(img, size=input_size, mode='bilinear')
+            mask = F.interpolate(mask, size=input_size, mode='nearest')
+            prediction = predict_single_image(model, img, mask, input_size, orig_size, device=device)
+        else:
+            multiscale_preds = []
+            for scale in scales:
+                target_size = [ceil(size * scale) for size in orig_size]
+                img = F.interpolate(img, size=target_size, mode='bilinear')
+                mask = F.interpolate(mask, size=target_size, mode='nearest')
+                multiscale_preds.append(
+                    predict_single_image(model, img, mask, target_size, orig_size, device=device))
 
-            with torch.no_grad():
-                pred = model(input_)
+            prediction = torch.cat(multiscale_preds).mean(dim=0).round()
 
-            pred, _ = model.postprocess(pred, target)
-            pred = pred.float().unsqueeze(0)
-            pred = F.interpolate(pred, size=orig_size, mode='nearest')
-            multiscale_preds.append(pred)
-
-        prediction = torch.cat(multiscale_preds).mean(dim=0).round().squeeze().cpu().numpy()
+        prediction = prediction.squeeze().cpu().numpy()
 
         # apply morphology postprocessing (i.e. opening)
         # when performing multiscale inference
@@ -124,6 +145,7 @@ def predict(model, dataset, scales=(0.5,), num_workers=4, device='cpu'):
                 selem[:, center] = 1
                 return selem
             prediction = opening(prediction, selem=get_selem(9))
+
         predictions.append(prediction)
 
     return predictions
@@ -149,7 +171,8 @@ def save_predictions(predictions, dataset, output_dir='predictions'):
         Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
 
 
-def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device='cpu'):
+def infer(model, data_dir, output_dir=None, input_size=None,
+          scales=(0.5,), num_workers=4, device='cpu'):
     """Making inference on a directory of images with given model checkpoint."""
 
     if output_dir is not None and not osp.exists(output_dir):
@@ -157,7 +180,7 @@ def infer(model, data_dir, output_dir=None, scales=(0.5,), num_workers=4, device
 
     dataset = SegmentationDataset(data_dir, train=False)
 
-    predictions = predict(model, dataset, scales=scales,
+    predictions = predict(model, dataset, input_size=input_size, scales=scales,
                           num_workers=num_workers, device=device)
 
     if output_dir is not None:
@@ -171,10 +194,13 @@ if __name__ == '__main__':
         args = parser.parse_args()
 
         device = args.device
-        scales = tuple(float(s) for s in args.scales.split(','))
+        input_size = None
+        if args.input_size is not None:
+            input_size = [int(s) for s in args.input_size.split(',')]
+        scales = [float(s) for s in args.scales.split(',')]
         model = prepare_model(args.model, args.checkpoint, device=device)
 
-        infer(model, args.dataset_path, output_dir=args.output, scales=scales,
-              num_workers=args.jobs, device=device)
+        infer(model, args.dataset_path, output_dir=args.output, input_size=input_size,
+              scales=scales, num_workers=args.jobs, device=device)
     finally:
         rmtree('models_ckpt', ignore_errors=True)
