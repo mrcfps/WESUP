@@ -12,9 +12,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from models import Wessup
-from models import CDWS
-from models import SizeLoss
+from models import initialize_model
 from utils import record
 from utils import log
 from utils.metrics import accuracy
@@ -43,7 +41,7 @@ def build_cli_parser():
     parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('-m', '--model', default='wessup', choices=['wessup', 'cdws', 'sizeloss'],
+    parser.add_argument('-m', '--model', default='wessup',
                         help='Which model to use')
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
@@ -100,11 +98,10 @@ def train_one_epoch(model, optimizer, no_val=False):
 
         pbar = tqdm(dataloaders[phase])
         for data in pbar:
-            train_one_iteration(model, optimizer, phase, *data)
-            # try:
-            #     train_one_iteration(model, optimizer, phase, *data)
-            # except RuntimeError as ex:
-            #     print(ex)
+            try:
+                train_one_iteration(model, optimizer, phase, *data)
+            except RuntimeError as ex:
+                print(ex)
 
         pbar.write(tracker.log())
         pbar.close()
@@ -117,15 +114,7 @@ def fit(args):
         print(f'Loading checkpoints from {args.resume_ckpt}.')
         checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
-    if args.model == 'wessup':
-        model = Wessup(checkpoint=checkpoint)
-    elif args.model == 'cdws':
-        model = CDWS(checkpoint=checkpoint)
-    elif args.model == 'sizeloss':
-        model = SizeLoss(checkpoint=checkpoint)
-    else:
-        raise ValueError(f'Unsupported model: {args.model}')
-
+    model = initialize_model(args.model, checkpoint=checkpoint)
     model = model.to(device)
     record.save_params(record_dir,
                        {**vars(args), 'model_config': model.config._to_dict()})

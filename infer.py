@@ -136,7 +136,7 @@ def predict(model, dataset, input_size=None, scales=(0.5,), num_workers=4, devic
 
         # apply morphology postprocessing (i.e. opening)
         # when performing multiscale inference
-        if len(scales) > 1:
+        if input_size is None and len(scales) > 1:
             def get_selem(size):
                 assert size % 2 == 1
                 selem = np.zeros((size, size))
