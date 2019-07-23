@@ -235,12 +235,12 @@ class AreaConstraintDataset(SegmentationDataset):
         if self.area_type == 'decimal':
             area = self.area_info.loc[idx]['area']
         else:  # integer
-            area = mask[1].sum()
+            area = mask[1].sum().float()
 
         if self.constraint == 'equality':
             area = torch.tensor([area, area])
         elif self.constraint == 'individual':
-            area = torch.tensor([area * (1 - self.margin), area * (1 + self.margin)])
+            area = torch.tensor([area * (1 - self.margin), area * (1 + self.margin)]).long()
         else:  # common
             lower = self.area_info.area.min()
             upper = self.area_info.area.max()
