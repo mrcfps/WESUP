@@ -1,4 +1,3 @@
-import os
 import os.path as osp
 from functools import partial
 
@@ -80,8 +79,6 @@ class Wessup(BaseModel):
         if checkpoint is not None:
             self.load_state_dict(checkpoint['model_state_dict'])
 
-        self.summary()
-
     def _hook_fn(self, _, input_, output):
         if self.feature_maps is None:
             self.fm_size = (input_[0].size(2), input_[0].size(3))
@@ -120,7 +117,7 @@ class Wessup(BaseModel):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
@@ -245,11 +242,3 @@ class Wessup(BaseModel):
             **kwargs,
         }, ckpt_path)
         print(f'Checkpoint saved to {ckpt_path}.')
-
-    def summary(self):
-        """Print summary information."""
-
-        print(f'Wessup initialized.')
-        print('-' * os.environ.get('COLUMNS', 80))
-        print(self.config)
-        print('-' * os.environ.get('COLUMNS', 80))

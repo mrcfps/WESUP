@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
@@ -131,3 +132,16 @@ class BaseModel(ABC, nn.Module):
                 metrics[func.__name__].append(func(P, G))
 
         return {k: np.mean(v) for k, v in metrics.items()}
+
+    def summary(self, logger=None):
+        lines = '\n'.join([
+            f'{self.__class__.__name__} initialized.',
+            '-' * os.environ.get('COLUMNS', 80),
+            str(self.config),
+            '-' * os.environ.get('COLUMNS', 80),
+        ])
+
+        if logger is not None:
+            logger.info(lines)
+        else:
+            print(lines)

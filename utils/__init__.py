@@ -1,11 +1,10 @@
 import torch
 
 
-def log(content, style='-'):
-    """Logging with underline."""
+def underline(content, style='-'):
+    """Underlining a sentence."""
 
-    print(content)
-    print(style * len(content.strip()))
+    return content + '\n' + style * len(content.strip())
 
 
 def empty_tensor():

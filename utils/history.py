@@ -5,7 +5,7 @@ from collections import defaultdict
 
 import pandas as pd
 
-from . import log
+from . import underline
 
 
 class HistoryTracker:
@@ -66,11 +66,13 @@ class HistoryTracker:
         """
 
         df = pd.read_csv(self.save_path)
-        log('\nTraining Summary', style='=')
 
-        for key in df.keys():
-            if key not in ['lr', 'loss', 'val_loss']:
-                print('{:20s} {:.4f}'.format(key, df[key][-last_n_epochs:].mean()))
+        metrics = '\n'.join(
+            f'{key:20s} {df[key][-last_n_epochs:].mean():.4f}'
+            for key in df.keys() if key not in ['lr', 'loss', 'val_loss']
+        )
+
+        return underline('\nTraining Summary', style='=') + metrics
 
 
 if __name__ == '__main__':

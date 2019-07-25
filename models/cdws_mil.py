@@ -1,5 +1,3 @@
-import os
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -82,8 +80,6 @@ class CDWS(BaseModel):
             self.load_state_dict(checkpoint['model_state_dict'])
         else:
             self._copy_weights_from_vgg16()
-
-        self.summary()
 
     def _copy_weights_from_vgg16(self):
         conv_layer_table = [
@@ -224,9 +220,3 @@ class CDWS(BaseModel):
             **kwargs,
         }, ckpt_path)
         print(f'Checkpoint saved to {ckpt_path}.')
-
-    def summary(self):
-        print('CDWS-MIL initialized.\n')
-        print('-' * os.environ.get('COLUMNS', 80))
-        print(self.config)
-        print('-' * os.environ.get('COLUMNS', 80))

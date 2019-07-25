@@ -1,5 +1,3 @@
-import os
-
 import torch
 import torch.nn.functional as F
 
@@ -25,7 +23,7 @@ class SizeLossConfig(BaseConfig):
     constraint = 'individual'
 
     # Input spatial size.
-    input_size = (400, 400)
+    input_size = (288, 400)
 
     # Positive constant that weights the importance of constraints.
     lambda_ = 0.01
@@ -34,7 +32,7 @@ class SizeLossConfig(BaseConfig):
     point_radius = 5
 
     # Initial learning rate.
-    initial_lr = 0.01
+    initial_lr = 0.0005
 
     # numerical stability term
     epsilon = 1e-7
@@ -54,8 +52,6 @@ class SizeLoss(BaseModel):
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint['model_state_dict'])
-
-        self.summary()
 
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
@@ -80,6 +76,9 @@ class SizeLoss(BaseModel):
         if checkpoint is not None:
             # load previous optimizer states
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, None
 
@@ -110,7 +109,7 @@ class SizeLoss(BaseModel):
 
         # size penalty
         pos_pred = pred[:, 1, ...]  # (B, H, W)
-        size_pred = pred.sum(dim=(1, 2))  # (B,)
+        size_pred = pos_pred.sum(dim=(1, 2))  # (B,)
         size_penalty = (size_pred < area[:, 0]).float() * (size_pred - area[:, 0]) ** 2 + \
             (size_pred > area[:, 1]).float() * (size_pred - area[:, 1]) ** 2  # (B,)
 
@@ -132,9 +131,3 @@ class SizeLoss(BaseModel):
             **kwargs,
         }, ckpt_path)
         print(f'Checkpoint saved to {ckpt_path}.')
-
-    def summary(self):
-        print('SizeLoss initialized.')
-        print('-' * os.environ.get('COLUMNS', 80))
-        print(self.config)
-        print('-' * os.environ.get('COLUMNS', 80))

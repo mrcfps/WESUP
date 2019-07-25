@@ -52,6 +52,8 @@ class SegmentationDataset(Dataset):
             seed: random seed
         """
 
+        self.root_dir = root_dir
+
         # path to original images
         self.img_paths = _list_images(osp.join(root_dir, "images"))
 
@@ -75,8 +77,6 @@ class SegmentationDataset(Dataset):
             np.random.shuffle(self.picked)
             self.picked = self.picked[:len(self)]
             self.picked.sort()
-
-        self.summary()
 
     def __len__(self):
         return int(self.proportion * len(self.img_paths))
@@ -149,17 +149,25 @@ class SegmentationDataset(Dataset):
 
         return img, mask
 
-    def summary(self):
+    def summary(self, logger=None):
         """Print summary information."""
 
-        print(
-            f"Segmentation dataset ({'training' if self.train else 'inference'}) "
-            f"initialized with {len(self)} images.")
+        lines = [
+            f"Segmentation dataset ({'training' if self.train else 'inference'}) ",
+            f"initialized with {len(self)} images from {self.root_dir}.",
+        ]
 
         if self.mode is not None:
-            print(f"Supervision mode: {self.mode}")
+            lines.append(f"Supervision mode: {self.mode}")
         else:
-            print("No supervision provided.")
+            lines.append("No supervision provided.")
+
+        lines = '\n'.join(lines)
+
+        if logger is not None:
+            logger.info(lines)
+        else:
+            print(lines)
 
 
 class AreaConstraintDataset(SegmentationDataset):
@@ -353,3 +361,7 @@ class CompoundDataset(Dataset):
 
     def __getitem__(self, idx):
         return tuple(dataset[idx] for dataset in self.datasets)
+
+    def summary(self, logger=None):
+        for dataset in self.datasets:
+            dataset.summary(logger=logger)

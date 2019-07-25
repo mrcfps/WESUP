@@ -3,6 +3,8 @@ Training module.
 """
 
 import argparse
+import glob
+import logging
 import os
 import os.path as osp
 import warnings
@@ -14,7 +16,7 @@ from tqdm import tqdm
 
 from models import initialize_model
 from utils import record
-from utils import log
+from utils import underline
 from utils.metrics import accuracy
 from utils.metrics import dice
 from utils.metrics import detection_f1
@@ -22,6 +24,10 @@ from utils.metrics import object_dice
 from utils.history import HistoryTracker
 
 warnings.filterwarnings('ignore')
+
+# training logger
+logger = logging.getLogger('Train')
+logger.setLevel(logging.DEBUG)
 
 # which device to use
 device = None
@@ -46,12 +52,8 @@ def build_cli_parser():
     parser.add_argument('-e', '--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('-b', '--batch-size', type=int, default=1, help='Minibatch size')
-    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
-                        help='Number of CPUs to use for data preparation')
     parser.add_argument('--proportion', type=float, default=1.0,
                         help='Proportion of data used for training')
-    parser.add_argument('--ckpt-period', type=int, default=10,
-                        help='Period for saving model checkpoint')
     parser.add_argument('-r', '--resume-ckpt',
                         help='Path to previous checkpoint for resuming training')
     parser.add_argument('--message', help='Note on this experiment')
@@ -87,7 +89,7 @@ def train_one_iteration(model, optimizer, phase, *data):
 def train_one_epoch(model, optimizer, no_val=False):
     phases = ['train'] if no_val else ['train', 'val']
     for phase in phases:
-        print(f'{phase.capitalize()} phase:')
+        logger.info(f'{phase.capitalize()} phase:')
 
         if phase == 'train':
             model.train()
@@ -101,9 +103,9 @@ def train_one_epoch(model, optimizer, no_val=False):
             try:
                 train_one_iteration(model, optimizer, phase, *data)
             except RuntimeError as ex:
-                print(ex)
+                logger.warning(ex)
 
-        pbar.write(tracker.log())
+        logger.info(tracker.log())
         pbar.close()
 
 
@@ -111,10 +113,11 @@ def fit(args):
     ############################# MODEL #############################
     checkpoint = None
     if args.resume_ckpt is not None:
-        print(f'Loading checkpoints from {args.resume_ckpt}.')
+        logger.info(f'Loading checkpoints from {args.resume_ckpt}.')
         checkpoint = torch.load(args.resume_ckpt, map_location=device)
 
     model = initialize_model(args.model, checkpoint=checkpoint)
+    model.summary(logger=logger)
     model = model.to(device)
     record.save_params(record_dir,
                        {**vars(args), 'model_config': model.config._to_dict()})
@@ -124,27 +127,27 @@ def fit(args):
     val_path = osp.join(args.dataset_path, 'val')
 
     global dataloaders
+    train_dataset = model.get_default_dataset(train_path, proportion=args.proportion)
+    train_dataset.summary(logger=logger)
     dataloaders = {
         'train': torch.utils.data.DataLoader(
-            model.get_default_dataset(train_path, proportion=args.proportion),
-            batch_size=args.batch_size, shuffle=True, num_workers=args.jobs
-        )
+            train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0,)
     }
 
     if osp.exists(val_path):
+        val_dataset = model.get_default_dataset(val_path, train=False)
+        val_dataset.summary(logger=logger)
         dataloaders['val'] = torch.utils.data.DataLoader(
-            model.get_default_dataset(val_path, train=False),
-            batch_size=1, num_workers=args.jobs
-        )
+            val_dataset, batch_size=1, num_workers=0,)
 
     ############################# TRAIN #############################
-    log('\nTraining Stage', '=')
+    logger.info(underline('\nTraining Stage', '='))
     optimizer, scheduler = model.get_default_optimizer(checkpoint)
     initial_epoch = checkpoint['epoch'] + 1 if checkpoint is not None else 1
     total_epochs = args.epochs + initial_epoch - 1
 
     for epoch in range(initial_epoch, total_epochs + 1):
-        log('\nEpoch {}/{}'.format(epoch, total_epochs), '-')
+        logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
 
         tracker.start_new_epoch(optimizer.param_groups[0]['lr'])
         train_one_epoch(model, optimizer, no_val=(not osp.exists(val_path)))
@@ -164,12 +167,15 @@ def fit(args):
         # save learning curves
         record.plot_learning_curves(tracker.save_path)
 
-        if epoch % args.ckpt_period == 0:
-            # save checkpoints for resuming training
-            ckpt_path = osp.join(
-                record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
-            model.save_checkpoint(ckpt_path, epoch=epoch,
-                                  optimizer_state_dict=optimizer.state_dict())
+        # remove previous checkpoints
+        for ckpt in glob.glob(osp.join(record_dir, 'checkpoints', '*.pth')):
+            os.remove(ckpt)
+
+        # save checkpoints for resuming training
+        ckpt_path = osp.join(
+            record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
+        model.save_checkpoint(ckpt_path, epoch=epoch,
+                              optimizer_state_dict=optimizer.state_dict())
 
     tracker.report()
 
@@ -187,6 +193,9 @@ if __name__ == '__main__':
         record.copy_source_files(record_dir)
 
     tracker = HistoryTracker(osp.join(record_dir, 'history.csv'))
+
+    logger.addHandler(logging.StreamHandler())
+    logger.addHandler(logging.FileHandler(osp.join(record_dir, 'train.log')))
 
     try:
         fit(args)
