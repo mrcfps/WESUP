@@ -96,13 +96,20 @@ class Wessup(BaseModel):
                 (self.feature_maps, output.squeeze()))
 
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
+        slic_params = {
+            'area': self.config.sp_area,
+            'compactness': self.config.sp_compactness,
+        }
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
                 return PointSupervisionDataset(root_dir, proportion=proportion,
+                                               slic_params=slic_params,
                                                multiscale_range=self.config.multiscale_range)
             return SegmentationDataset(root_dir, proportion=proportion,
+                                       slic_params=slic_params,
                                        multiscale_range=self.config.multiscale_range)
-        return SegmentationDataset(root_dir, rescale_factor=self.config.rescale_factor, train=False)
+        return SegmentationDataset(root_dir, rescale_factor=self.config.rescale_factor,
+                                   slic_params=slic_params, train=False)
 
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.SGD(
@@ -123,18 +130,11 @@ class Wessup(BaseModel):
 
     def preprocess(self, *data, device='cpu'):
         data = [datum.to(device) for datum in data]
-        if len(data) == 3:
-            img, pixel_mask, point_mask = data
+        if len(data) == 4:
+            img, pixel_mask, point_mask, segments = data
         else:
-            img, pixel_mask = data
+            img, pixel_mask, segments = data
             point_mask = empty_tensor()
-
-        segments = slic(
-            img.squeeze().cpu().numpy().transpose(1, 2, 0),
-            n_segments=int(img.size(-2) * img.size(-1) / self.config.sp_area),
-            compactness=self.config.sp_compactness,
-        )
-        segments = torch.LongTensor(segments).to(img.device)
 
         if point_mask is not None and not is_empty_tensor(point_mask):
             mask = point_mask.squeeze()
