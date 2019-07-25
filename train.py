@@ -7,6 +7,7 @@ import glob
 import logging
 import os
 import os.path as osp
+import time
 import warnings
 from shutil import rmtree
 
@@ -90,6 +91,7 @@ def train_one_epoch(model, optimizer, no_val=False):
     phases = ['train'] if no_val else ['train', 'val']
     for phase in phases:
         logger.info(f'{phase.capitalize()} phase:')
+        start = time.time()
 
         if phase == 'train':
             model.train()
@@ -105,6 +107,7 @@ def train_one_epoch(model, optimizer, no_val=False):
             except RuntimeError as ex:
                 logger.warning(ex)
 
+        logger.info(f'Took {time.time() - start:.2f}s.')
         logger.info(tracker.log())
         pbar.close()
 
@@ -177,7 +180,7 @@ def fit(args):
         model.save_checkpoint(ckpt_path, epoch=epoch,
                               optimizer_state_dict=optimizer.state_dict())
 
-    tracker.report()
+    logger.info(tracker.report())
 
 
 if __name__ == '__main__':

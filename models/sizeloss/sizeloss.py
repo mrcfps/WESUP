@@ -32,7 +32,7 @@ class SizeLossConfig(BaseConfig):
     point_radius = 5
 
     # Initial learning rate.
-    initial_lr = 0.0005
+    initial_lr = 0.0001
 
     # numerical stability term
     epsilon = 1e-7
@@ -130,4 +130,3 @@ class SizeLoss(BaseModel):
             'model_state_dict': self.state_dict(),
             **kwargs,
         }, ckpt_path)
-        print(f'Checkpoint saved to {ckpt_path}.')

@@ -241,4 +241,3 @@ class Wessup(BaseModel):
             'model_state_dict': self.state_dict(),
             **kwargs,
         }, ckpt_path)
-        print(f'Checkpoint saved to {ckpt_path}.')
