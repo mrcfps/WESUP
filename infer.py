@@ -186,6 +186,8 @@ def infer(model, data_dir, output_dir=None, input_size=None,
     if output_dir is not None:
         save_predictions(predictions, dataset, output_dir)
 
+    return predictions
+
 
 if __name__ == '__main__':
     parser = build_cli_parser()
@@ -198,9 +200,13 @@ if __name__ == '__main__':
         if args.input_size is not None:
             input_size = [int(s) for s in args.input_size.split(',')]
         scales = [float(s) for s in args.scales.split(',')]
-        model = prepare_model(args.model, args.checkpoint, device=device)
 
-        infer(model, args.dataset_path, output_dir=args.output, input_size=input_size,
+        output_dir = args.output
+        if output_dir is None:
+            output_dir = osp.abspath(osp.join(osp.dirname(args.checkpoint), '..', 'results'))
+
+        model = prepare_model(args.model, args.checkpoint, device=device)
+        infer(model, args.dataset_path, output_dir=output_dir, input_size=input_size,
               scales=scales, num_workers=args.jobs, device=device)
     finally:
         rmtree('models_ckpt', ignore_errors=True)
