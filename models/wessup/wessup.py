@@ -118,13 +118,16 @@ class Wessup(BaseModel):
             momentum=self.config.momentum,
             weight_decay=self.config.weight_decay
         )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         if checkpoint is not None:
-            # load previous optimizer states
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+            try:
+                # load previous optimizer states
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except KeyError:  # if not present in checkpoint, ignore it
+                pass
 
         return optimizer, scheduler
 

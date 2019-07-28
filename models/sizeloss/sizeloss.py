@@ -23,7 +23,7 @@ class SizeLossConfig(BaseConfig):
     constraint = 'individual'
 
     # Input spatial size.
-    input_size = (288, 400)
+    input_size = (400, 400)
 
     # Positive constant that weights the importance of constraints.
     lambda_ = 0.01
@@ -72,15 +72,18 @@ class SizeLoss(BaseModel):
         optimizer = torch.optim.Adam(self.network.parameters(),
                                      lr=self.config.initial_lr,
                                      betas=(0.9, 0.99))
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 'min', patience=100, factor=0.5, min_lr=1e-5, verbose=True)
 
         if checkpoint is not None:
-            # load previous optimizer states
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            try:
+                # load previous optimizer states
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except KeyError:  # if not present in checkpoint, ignore it
+                pass
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
-
-        return optimizer, None
+        return optimizer, scheduler
 
     def preprocess(self, *data, device='cpu'):
         if self.training:
