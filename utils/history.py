@@ -72,7 +72,7 @@ class HistoryTracker:
             for key in df.keys() if key not in ['lr', 'loss', 'val_loss']
         )
 
-        return underline('\nTraining Summary', style='=') + metrics
+        return underline('\nTraining Summary', style='=') + '\n' + metrics
 
 
 if __name__ == '__main__':

@@ -147,7 +147,8 @@ def fit(args):
     logger.info(underline('\nTraining Stage', '='))
     optimizer, scheduler = model.get_default_optimizer(checkpoint)
     initial_epoch = checkpoint['epoch'] + 1 if checkpoint is not None else 1
-    total_epochs = args.epochs + initial_epoch - 1
+    epochs = args.epochs if not args.smoke else 1
+    total_epochs = epochs + initial_epoch - 1
 
     for epoch in range(initial_epoch, total_epochs + 1):
         logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
@@ -170,15 +171,15 @@ def fit(args):
         # save learning curves
         record.plot_learning_curves(tracker.save_path)
 
-        # remove previous checkpoints
-        for ckpt in glob.glob(osp.join(record_dir, 'checkpoints', '*.pth')):
-            os.remove(ckpt)
-
         # save checkpoints for resuming training
         ckpt_path = osp.join(
             record_dir, 'checkpoints', 'ckpt.{:04d}.pth'.format(epoch))
         model.save_checkpoint(ckpt_path, epoch=epoch,
                               optimizer_state_dict=optimizer.state_dict())
+
+        # remove previous checkpoints
+        for ckpt in sorted(glob.glob(osp.join(record_dir, 'checkpoints', '*.pth')))[:-1]:
+            os.remove(ckpt)
 
     logger.info(tracker.report())
 
@@ -202,6 +203,8 @@ if __name__ == '__main__':
 
     try:
         fit(args)
+    except Exception as ex:
+        logger.error(ex)
     finally:
         if args.smoke:
             rmtree(record_dir, ignore_errors=True)
