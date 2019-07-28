@@ -103,13 +103,10 @@ class Wessup(BaseModel):
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
                 return PointSupervisionDataset(root_dir, proportion=proportion,
-                                               slic_params=slic_params,
                                                multiscale_range=self.config.multiscale_range)
             return SegmentationDataset(root_dir, proportion=proportion,
-                                       slic_params=slic_params,
                                        multiscale_range=self.config.multiscale_range)
-        return SegmentationDataset(root_dir, rescale_factor=self.config.rescale_factor,
-                                   slic_params=slic_params, train=False)
+        return SegmentationDataset(root_dir, rescale_factor=self.config.rescale_factor, train=False)
 
     def get_default_optimizer(self, checkpoint=None):
         optimizer = torch.optim.SGD(
@@ -133,11 +130,18 @@ class Wessup(BaseModel):
 
     def preprocess(self, *data, device='cpu'):
         data = [datum.to(device) for datum in data]
-        if len(data) == 4:
-            img, pixel_mask, point_mask, segments = data
+        if len(data) == 3:
+            img, pixel_mask, point_mask = data
         else:
-            img, pixel_mask, segments = data
+            img, pixel_mask = data
             point_mask = empty_tensor()
+
+        segments = slic(
+            img.squeeze().cpu().numpy().transpose(1, 2, 0),
+            n_segments=int(img.size(-2) * img.size(-1) / self.config.sp_area),
+            compactness=self.config.sp_compactness,
+        )
+        segments = torch.LongTensor(segments).to(img.device)
 
         if point_mask is not None and not is_empty_tensor(point_mask):
             mask = point_mask.squeeze()
@@ -212,16 +216,20 @@ class Wessup(BaseModel):
 
         if labeled_num < total_num:
             # weakly-supervised mode
-            propagated_labels = label_propagate(self.clf_input_features, sp_labels,
-                                                threshold=self.config.propagate_threshold)
             loss = ce(self._sp_pred[:labeled_num], sp_labels)
-            propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
-            loss += self.config.propagate_weight * propagate_loss
+
+            if self.config.enable_propagation:
+                propagated_labels = label_propagate(self.clf_input_features, sp_labels,
+                                                    threshold=self.config.propagate_threshold)
+
+                propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)
+                loss += self.config.propagate_weight * propagate_loss
 
             if metrics is not None and isinstance(metrics, dict):
                 metrics['labeled_sp_ratio'] = labeled_num / total_num
-                metrics['propagated_labels'] = propagated_labels.sum().item()
-                metrics['propagate_loss'] = propagate_loss.item()
+                if self.config.enable_propagation:
+                    metrics['propagated_labels'] = propagated_labels.sum().item()
+                    metrics['propagate_loss'] = propagate_loss.item()
         else:  # fully-supervised mode
             loss = ce(self._sp_pred, sp_labels)
 

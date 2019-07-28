@@ -5,10 +5,10 @@ class WessupConfig(BaseConfig):
     """Configuration for Wessup model."""
 
     # Rescale factor to subsample input images.
-    rescale_factor = 0.25
+    rescale_factor = 0.5
 
     # mult-scale range for training
-    multiscale_range = (0.2, 0.25)
+    multiscale_range = (0.4, 0.6)
 
     # Number of target classes.
     n_classes = 2
@@ -22,6 +22,9 @@ class WessupConfig(BaseConfig):
     # Superpixel parameters.
     sp_area = 50
     sp_compactness = 40
+
+    # whether to enable label propagation
+    enable_propagation = True
 
     # Weight for label-propagated samples when computing loss function
     propagate_threshold = 0.8
