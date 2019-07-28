@@ -35,12 +35,10 @@ class SegmentationDataset(Dataset):
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
         - mask: tensor of size (C, H, W) with type long or an empty tensor
-        - segments (optional): superpixel segments (if `slic_params` is provided)
     """
 
     def __init__(self, root_dir, mode=None, target_size=None, rescale_factor=None,
-                 multiscale_range=None, slic_params=None, train=True,
-                 proportion=1, n_classes=2, seed=0):
+                 multiscale_range=None, train=True, proportion=1, n_classes=2, seed=0):
         """Initialize a new SegmentationDataset.
 
         Args:
@@ -49,7 +47,6 @@ class SegmentationDataset(Dataset):
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
             multiscale_range: a tuple containing the limits of random rescaling
-            slic_params: parameters dictionary for SLIC over-segmentation
             train: whether in training mode
             proportion: proportion of data to be used (between 0 and 1) 
             n_classes: number of target classes
@@ -69,7 +66,7 @@ class SegmentationDataset(Dataset):
         self.mode = mode or 'mask' if self.mask_paths is not None else None
         self.target_size = target_size
         self.rescale_factor = rescale_factor
-        self.slic_params = slic_params
+
         self.train = train
         self.proportion = proportion
         self.n_classes = n_classes
@@ -139,13 +136,6 @@ class SegmentationDataset(Dataset):
 
         return img, mask
 
-    def _segment_superpixels(self, img):
-        n_segments = int(img.shape[0] * img.shape[1] / self.slic_params['area'])
-        segments = slic(img, n_segments=n_segments,
-                        compactness=self.slic_params['compactness'])
-
-        return torch.LongTensor(segments)
-
     def __getitem__(self, idx):
         idx = self.picked[idx]
         img = Image.open(self.img_paths[idx])
@@ -157,16 +147,7 @@ class SegmentationDataset(Dataset):
         if self.train:
             img, mask = self._augment(img, mask)
 
-        segments = None
-        if self.slic_params is not None:
-            segments = self._segment_superpixels(img)
-
-        img, mask = self._convert_image_and_mask_to_tensor(img, mask)
-
-        if segments is not None:
-            return img, mask, segments
-
-        return img, mask
+        return self._convert_image_and_mask_to_tensor(img, mask)
 
     def summary(self, logger=None):
         """Print summary information."""
@@ -286,7 +267,6 @@ class PointSupervisionDataset(SegmentationDataset):
         - img: tensor of size (3, H, W) with type float32
         - pixel_mask: pixel-level annotation of size (C, H, W) with type long or an empty tensor
         - point_mask: point-level annotation of size (C, H, W) with type long or an empty tensor
-        - segments (optional): superpixel segments (if `slic_params` is given)
     """
 
     def __init__(self, root_dir, target_size=None, rescale_factor=None, multiscale_range=None,
@@ -301,7 +281,6 @@ class PointSupervisionDataset(SegmentationDataset):
         # path to point annotation files
         self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
 
-        self.slic_params = slic_params
         self.radius = radius
 
     def _augment(self, *data):
@@ -367,14 +346,7 @@ class PointSupervisionDataset(SegmentationDataset):
         else:
             point_mask = empty_tensor()
 
-        segments = None
-        if self.slic_params is not None:
-            segments = self._segment_superpixels(img)
-
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
-
-        if segments is not None:
-            return img, pixel_mask, point_mask, segments
 
         return img, pixel_mask, point_mask
 
