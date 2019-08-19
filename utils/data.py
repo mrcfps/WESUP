@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import albumentations as A
 from PIL import Image
-from skimage.segmentation import slic
+from skimage.segmentation import find_boundaries
+from skimage.morphology import dilation
 
 import torch
 from torch.utils.data import Dataset
@@ -35,15 +36,17 @@ class SegmentationDataset(Dataset):
     This dataset returns following data when indexing:
         - img: tensor of size (3, H, W) with type float32
         - mask: tensor of size (C, H, W) with type long or an empty tensor
+        - cont (optional): tensor of size (C, H, W) with type long, only when `contour` is `True`
     """
 
-    def __init__(self, root_dir, mode=None, target_size=None, rescale_factor=None,
+    def __init__(self, root_dir, mode=None, contour=False, target_size=None, rescale_factor=None,
                  multiscale_range=None, train=True, proportion=1, n_classes=2, seed=0):
         """Initialize a new SegmentationDataset.
 
         Args:
             root_dir: path to dataset root
             mode: one of `mask`, `area` or `point`
+            contour: whether to include contours
             target_size: desired output spatial size
             rescale_factor: multiplier for spatial size
             multiscale_range: a tuple containing the limits of random rescaling
@@ -64,6 +67,11 @@ class SegmentationDataset(Dataset):
             self.mask_paths = _list_images(osp.join(root_dir, "masks"))
 
         self.mode = mode or 'mask' if self.mask_paths is not None else None
+
+        if self.mode != 'mask' and contour:
+            raise ValueError('mask is required for providing contours')
+
+        self.contour = contour
         self.target_size = target_size
         self.rescale_factor = rescale_factor
 
@@ -127,12 +135,19 @@ class SegmentationDataset(Dataset):
         img = TF.to_tensor(img)
         if mask is not None:
             mask = np.array(mask)
-            mask = np.concatenate(
-                [np.expand_dims(mask == i, 0)
-                 for i in range(self.n_classes)])
+            if self.contour:
+                cont = dilation(find_boundaries(mask))
+            mask = np.concatenate([np.expand_dims(mask == i, 0)
+                                   for i in range(self.n_classes)])
             mask = torch.LongTensor(mask.astype("int64"))
         else:
             mask = empty_tensor()
+
+        if self.contour:
+            cont = np.concatenate([np.expand_dims(cont == i, 0)
+                                   for i in range(self.n_classes)])
+            cont = torch.LongTensor(cont.astype("int64"))
+            return img, mask, cont
 
         return img, mask
 
