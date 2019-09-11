@@ -18,11 +18,11 @@ from .common import label_propagate
 from .config import config
 
 
-class Wessup(BaseModel):
+class WESUP(BaseModel):
     """WEakly Spervised SUPerpixels."""
 
     def __init__(self, checkpoint=None):
-        """Initialize a Wessup model.
+        """Initialize a WESUP model.
 
         Arguments:
             checkpoint: a checkpoint dictionary containing necessary data.
@@ -61,7 +61,7 @@ class Wessup(BaseModel):
         # final softmax classifier
         self.classifier = nn.Sequential(
             nn.Linear(32, 2),
-            nn.Softmax()
+            nn.Softmax(dim=1)
         )
 
         # store conv feature maps
@@ -71,7 +71,7 @@ class Wessup(BaseModel):
         self.fm_size = None
 
         # label propagation input features
-        self.clf_input_features = None
+        self._sp_features = None
 
         # superpixel predictions (internally tracked to compute loss)
         self._sp_pred = None
@@ -87,7 +87,7 @@ class Wessup(BaseModel):
             side_conv_name = f'side_conv{len(self.feature_maps)}'
 
         output = getattr(self, side_conv_name)(output.clone())
-        output = F.interpolate(output, self.fm_size, mode='bilinear')
+        output = F.interpolate(output, self.fm_size, mode='bilinear', align_corners=True)
 
         if self.feature_maps is None:
             self.feature_maps = output.squeeze()
@@ -116,7 +116,7 @@ class Wessup(BaseModel):
             weight_decay=self.config.weight_decay
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
 
         if checkpoint is not None:
             try:
@@ -180,7 +180,7 @@ class Wessup(BaseModel):
 
         # reduce superpixel feature dimensions with fully connected layers
         x = self.fc_layers(x)
-        self.clf_input_features = x
+        self._sp_features = x
 
         # classify each superpixel
         self._sp_pred = self.classifier(x)
@@ -219,7 +219,7 @@ class Wessup(BaseModel):
             loss = ce(self._sp_pred[:labeled_num], sp_labels)
 
             if self.config.enable_propagation:
-                propagated_labels = label_propagate(self.clf_input_features, sp_labels,
+                propagated_labels = label_propagate(self._sp_features, sp_labels,
                                                     threshold=self.config.propagate_threshold)
 
                 propagate_loss = ce(self._sp_pred[labeled_num:], propagated_labels)

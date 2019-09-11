@@ -5,7 +5,7 @@ sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
 
 from .cdws_mil import CDWS
 from .mild_net import MILDNet
-from .wessup import Wessup
+from .wesup import WESUP
 from .sizeloss import SizeLoss
 
 
@@ -21,7 +21,7 @@ def initialize_model(model_type, checkpoint=None):
     """
 
     if model_type == 'wessup':
-        model = Wessup(checkpoint=checkpoint)
+        model = WESUP(checkpoint=checkpoint)
     elif model_type == 'cdws':
         model = CDWS(checkpoint=checkpoint)
     elif model_type == 'sizeloss':

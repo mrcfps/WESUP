@@ -1,7 +1,7 @@
 from ..base import BaseConfig
 
 
-class WessupConfig(BaseConfig):
+class WESUPConfig(BaseConfig):
     """Configuration for Wessup model."""
 
     # Rescale factor to subsample input images.
@@ -42,4 +42,4 @@ class WessupConfig(BaseConfig):
     epsilon = 1e-7
 
 
-config = WessupConfig()
+config = WESUPConfig()
