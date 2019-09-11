@@ -185,15 +185,9 @@ class WESUP(BaseModel):
         # classify each superpixel
         self._sp_pred = self.classifier(x)
 
-        # flatten sp_maps to one channel
-        sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)
-
-        # initialize prediction mask
-        pred = torch.zeros(height, width, self._sp_pred.size(1))
-        pred = pred.to(sp_maps.device)
-
-        for sp_idx in range(sp_maps.max().item() + 1):
-            pred[sp_maps == sp_idx] = self._sp_pred[sp_idx]
+        # compute final segmentation prediction
+        sp_maps = (sp_maps > 0).float()
+        pred = torch.mm(sp_maps.T, self._sp_pred).view(height, width, -1)
 
         return pred.unsqueeze(0)[..., 1]
 
