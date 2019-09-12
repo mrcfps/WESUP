@@ -10,10 +10,15 @@ import torch
 from infer import prepare_model, infer
 
 
-def test(dataset_path, ckpt_path, model_type='wessup', input_size=None,
+def test(ckpt_path, model_type='wessup', input_size=None,
          scales=(0.5,), num_workers=4, device='cpu'):
     record_dir = osp.abspath(osp.join(ckpt_path, '..', '..'))
-    results_dir = osp.join(record_dir, f'results-{len(scales)}scale')
+
+    if input_size is not None:
+        results_dir = osp.join(record_dir, 'results')
+    else:
+        results_dir = osp.join(record_dir, f'results-{len(scales)}scale')
+
     if not osp.exists(results_dir):
         os.mkdir(results_dir)
 
@@ -21,12 +26,12 @@ def test(dataset_path, ckpt_path, model_type='wessup', input_size=None,
 
     try:
         print('\nTesting on test set A ...')
-        data_dir = osp.join(dataset_path, 'testA')
+        data_dir = osp.join('data_glas_all', 'testA')
         output_dir = osp.join(results_dir, 'testA')
         infer(model, data_dir, output_dir, input_size, scales, num_workers=num_workers, device=device)
 
         print('\nTesting on test set B ...')
-        data_dir = osp.join(dataset_path, 'testB')
+        data_dir = osp.join('data_glas_all', 'testB')
         output_dir = osp.join(results_dir, 'testB')
         infer(model, data_dir, output_dir, input_size, scales, num_workers=num_workers, device=device)
     finally:
@@ -35,7 +40,6 @@ def test(dataset_path, ckpt_path, model_type='wessup', input_size=None,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_path', help='Path to dataset')
     parser.add_argument('-m', '--model', default='wessup',
                         help='Which model to use')
     parser.add_argument('--input-size', help='Input size for model')
@@ -53,5 +57,5 @@ if __name__ == '__main__':
         input_size = [int(s) for s in args.input_size.split(',')]
     scales = tuple(float(s) for s in args.scales.split(','))
 
-    test(args.dataset_path, args.checkpoint, model_type=args.model, input_size=input_size,
+    test(args.checkpoint, model_type=args.model, input_size=input_size,
          scales=scales, num_workers=args.jobs, device=args.device)
