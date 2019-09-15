@@ -169,9 +169,9 @@ class WESUP(BaseModel):
         n_superpixels, height, width = sp_maps.size()
 
         # extract conv feature maps and flatten
+        self.feature_maps = None
         _ = self.backbone(x)
         x = self.feature_maps
-        self.feature_maps = None
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel
@@ -187,7 +187,7 @@ class WESUP(BaseModel):
 
         # compute final segmentation prediction
         sp_maps = (sp_maps > 0).float()
-        pred = torch.mm(sp_maps.T, self._sp_pred).view(height, width, -1)
+        pred = torch.mm(sp_maps.t(), self._sp_pred).view(height, width, -1)
 
         return pred.unsqueeze(0)[..., 1]
 
