@@ -3,8 +3,8 @@ Data loading utilities.
 """
 
 import csv
-import os.path as osp
 import glob
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -26,7 +26,7 @@ def _list_images(path):
 
     images = []
     for ext in ("jpg", "jpeg", "png", "bmp"):
-        images.extend(glob.glob(osp.join(path, f"*.{ext}")))
+        images.extend(path.glob(f"*.{ext}"))
     return sorted(images)
 
 
@@ -56,15 +56,15 @@ class SegmentationDataset(Dataset):
             seed: random seed
         """
 
-        self.root_dir = root_dir
+        self.root_dir = Path(root_dir)
 
         # path to original images
-        self.img_paths = _list_images(osp.join(root_dir, "images"))
+        self.img_paths = _list_images(self.root_dir / 'images')
 
         # path to mask annotations (optional)
         self.mask_paths = None
-        if osp.exists(osp.join(root_dir, "masks")):
-            self.mask_paths = _list_images(osp.join(root_dir, "masks"))
+        if (self.root_dir / 'masks').exists():
+            self.mask_paths = _list_images(self.root_dir / 'masks')
 
         self.mode = mode or 'mask' if self.mask_paths is not None else None
 
@@ -139,14 +139,14 @@ class SegmentationDataset(Dataset):
                 cont = dilation(find_boundaries(mask))
             mask = np.concatenate([np.expand_dims(mask == i, 0)
                                    for i in range(self.n_classes)])
-            mask = torch.LongTensor(mask.astype("int64"))
+            mask = torch.as_tensor(mask.astype('int64'), dtype=torch.long)
         else:
             mask = empty_tensor()
 
         if self.contour:
             cont = np.concatenate([np.expand_dims(cont == i, 0)
                                    for i in range(self.n_classes)])
-            cont = torch.LongTensor(cont.astype("int64"))
+            cont = torch.as_tensor(cont.astype('int64'), dtype=torch.long)
             return img, mask, cont
 
         return img, mask
@@ -217,8 +217,7 @@ class AreaConstraintDataset(SegmentationDataset):
                          rescale_factor=rescale_factor, train=train, proportion=proportion)
 
         # area information (# foreground pixels divided by total pixels, between 0 and 1)
-        self.area_info = pd.read_csv(osp.join(root_dir, "area.csv"),
-                                     usecols=['img', 'area'])
+        self.area_info = pd.read_csv(self.root_dir / 'area.csv', usecols=['img', 'area'])
 
         self.area_type = area_type
         self.constraint = constraint
@@ -284,17 +283,17 @@ class PointSupervisionDataset(SegmentationDataset):
         - point_mask: point-level annotation of size (C, H, W) with type long or an empty tensor
     """
 
-    def __init__(self, root_dir, target_size=None, rescale_factor=None, multiscale_range=None,
-                 slic_params=None, radius=0, train=True, proportion=1):
+    def __init__(self, root_dir, target_size=None, rescale_factor=None,
+                 multiscale_range=None, radius=0, train=True, proportion=1):
         super().__init__(root_dir, mode='point', target_size=target_size,
                          rescale_factor=rescale_factor, train=train,
                          proportion=proportion, multiscale_range=multiscale_range)
 
         # path to point supervision directory
-        self.point_root = osp.join(root_dir, f'points')
+        self.point_root = self.root_dir / 'points'
 
         # path to point annotation files
-        self.point_paths = sorted(glob.glob(osp.join(self.point_root, "*.csv")))
+        self.point_paths = sorted(self.point_root.glob('*.csv'))
 
         self.radius = radius
 
@@ -357,7 +356,7 @@ class PointSupervisionDataset(SegmentationDataset):
             cv2.circle(point_mask[class_], (x, y), self.radius, 1, -1)
 
         if point_mask is not None:
-            point_mask = torch.LongTensor(point_mask.astype('int64'))
+            point_mask = torch.as_tensor(point_mask.astype('int64'), dtype=torch.long)
         else:
             point_mask = empty_tensor()
 

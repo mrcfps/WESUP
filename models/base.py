@@ -255,19 +255,18 @@ class BaseTrainer(ABC):
         self.kwargs = {**self.kwargs, **kwargs}
 
         self.load_checkpoint(self.kwargs.get('checkpoint'))
-        self.logger.addHandler(logging.FileHandler(str(self.record_dir / 'train.log')))
+        self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))
         serializable_kwargs = {
             k: v for k, v in self.kwargs.items()
             if isinstance(v, (int, float, str, tuple))
         }
-        record.save_params(str(self.record_dir), serializable_kwargs)
+        record.save_params(self.record_dir, serializable_kwargs)
         self.logger.info(str(serializable_kwargs) + '\n')
         self.tracker.save_path = self.record_dir / 'history.csv'
-
         data_root = Path(data_root)
         train_path = data_root / 'train'
         val_path = data_root / 'val'
-        train_dataset = self.get_default_dataset(str(train_path),
+        train_dataset = self.get_default_dataset(train_path,
                                                  proportion=self.kwargs.get('proportion', 1))
         train_dataset.summary(logger=self.logger)
 
@@ -279,7 +278,7 @@ class BaseTrainer(ABC):
         }
 
         if val_path.exists():
-            val_dataset = self.get_default_dataset(str(val_path), train=False)
+            val_dataset = self.get_default_dataset(val_path, train=False)
             val_dataset.summary(logger=self.logger)
             self.dataloaders['val'] = torch.utils.data.DataLoader(
                 val_dataset, batch_size=1,
@@ -311,7 +310,7 @@ class BaseTrainer(ABC):
 
             # remove previous checkpoints
             for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
-                os.remove(str(ckpt_path))
+                os.remove(ckpt_path)
 
         self.logger.info(self.tracker.report())
 
