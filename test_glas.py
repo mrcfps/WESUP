@@ -26,12 +26,12 @@ def test(ckpt_path, model_type='wessup', input_size=None,
 
     try:
         print('\nTesting on test set A ...')
-        data_dir = osp.join('data_glas_all', 'testA')
+        data_dir = osp.join('data/GLAS_all', 'testA')
         output_dir = osp.join(results_dir, 'testA')
         infer(model, data_dir, output_dir, input_size, scales, num_workers=num_workers, device=device)
 
         print('\nTesting on test set B ...')
-        data_dir = osp.join('data_glas_all', 'testB')
+        data_dir = osp.join('data/GLAS_all', 'testB')
         output_dir = osp.join(results_dir, 'testB')
         infer(model, data_dir, output_dir, input_size, scales, num_workers=num_workers, device=device)
     finally:

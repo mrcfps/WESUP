@@ -34,7 +34,7 @@ def build_cli_parser():
     parser.add_argument('--scales', default='0.5', help='Optional multiscale inference')
     parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
                         help='Which device to use')
-    parser.add_argument('-o', '--output', default='predictions',
+    parser.add_argument('-o', '--output',
                         help='Path to store visualization and metrics result')
     parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count(),
                         help='Number of CPUs to use for preprocessing')
@@ -51,17 +51,17 @@ def prepare_model(model_type, ckpt_path=None, device='cpu'):
         print(f'Loaded checkpoint from {ckpt_path}.')
 
     # copy models module next to checkpoint directory (if present)
-    models_dir = osp.abspath(osp.join(ckpt_path, '..', '..', 'source', 'models'))
-    models_path = 'models_ckpt'
-    if osp.exists(models_dir):
-        if osp.exists(models_path):
-            rmtree(models_path)
-        copytree(models_dir, models_path)
-    else:
-        # fall back to current models module
-        models_path = 'models'
+    # models_dir = osp.abspath(osp.join(ckpt_path, '..', '..', 'source', 'models'))
+    # models_path = 'models_ckpt'
+    # if osp.exists(models_dir):
+    #     if osp.exists(models_path):
+    #         rmtree(models_path)
+    #     copytree(models_dir, models_path)
+    # else:
+    #     # fall back to current models module
+        # models_path = 'models'
 
-    models = import_module(models_path)
+    models = import_module('models')
     if hasattr(models, 'initialize_model'):
         model = models.initialize_model(model_type, checkpoint=checkpoint)
     elif model_type == 'wessup':

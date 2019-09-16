@@ -2,6 +2,9 @@ import argparse
 import glob
 import os
 import os.path as osp
+import sys
+
+sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
 
 import numpy as np
 import pandas as pd
@@ -72,7 +75,7 @@ print('Test A')
 print('\nReading predictions and gts ...')
 pred_paths = sorted(glob.glob(osp.join(pred_root, 'testA', '*.bmp')))
 predictions = executor(delayed(postprocess)(imread(pred_path) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data_glas_all/testA/masks/*.bmp')))
+gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data/GLAS_all/testA/masks/*.bmp')))
 
 print('Saving new predictions ...')
 for pred, pred_path in zip(predictions, pred_paths):
@@ -86,7 +89,7 @@ print('\nTest B')
 print('\nReading predictions and gts ...')
 pred_paths = sorted(glob.glob(osp.join(pred_root, 'testB', '*.bmp')))
 predictions = executor(delayed(postprocess)(imread(pred_path) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data_glas_all/testB/masks/*.bmp')))
+gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data/GLAS_all/testB/masks/*.bmp')))
 
 print('Saving new predictions ...')
 for pred, pred_path in zip(predictions, pred_paths):

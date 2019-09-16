@@ -1,34 +1,42 @@
 import sys
-import os.path as osp
+from pathlib import Path
 
-sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
+sys.path.append(str(Path(__file__).parent.parent.absolute()))
 
-from .cdws_mil import CDWS
-from .mild_net import MILDNet
-from .wesup import WESUP
-from .sizeloss import SizeLoss
+from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
+from .mild_net import MILDNet, MILDNetConfig, MILDNetTrainer
+from .wesup import WESUP, WESUPConfig, WESUPTrainer
+from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 
 
-def initialize_model(model_type, checkpoint=None):
+def initialize_trainer(model_type, **kwargs):
     """Initialize a model.
 
     Args:
-        model_type: either 'wessup', 'cdws' 'sizeloss' or 'mild'
-        checkpoint: model checkpoint
-    
+        model_type: either 'wesup', 'cdws' 'sizeloss' or 'mild'
+        kwargs: additional training config
+
     Returns:
         model: a model instance with given type
     """
 
-    if model_type == 'wessup':
-        model = WESUP(checkpoint=checkpoint)
+    if model_type == 'wesup':
+        kwargs = {**WESUPConfig().to_dict(), **kwargs}
+        model = WESUP(**kwargs)
+        trainer = WESUPTrainer(model, **kwargs)
     elif model_type == 'cdws':
-        model = CDWS(checkpoint=checkpoint)
+        kwargs = {**CDWSConfig().to_dict(), **kwargs}
+        model = CDWS(**kwargs)
+        trainer = CDWSTrainer(model, **kwargs)
     elif model_type == 'sizeloss':
-        model = SizeLoss(checkpoint=checkpoint)
+        kwargs = {**SizeLossConfig().to_dict(), **kwargs}
+        model = SizeLoss(**kwargs)
+        trainer = SizeLossTrainer(model, **kwargs)
     elif model_type == 'mild':
-        model = MILDNet(checkpoint=checkpoint)
+        kwargs = {**MILDNetConfig().to_dict(), **kwargs}
+        model = MILDNet()
+        trainer = MILDNetTrainer(model, **kwargs)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
-    
-    return model
+
+    return trainer

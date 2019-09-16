@@ -45,7 +45,7 @@ def save_params(record_dir, params):
     num_of_runs = len([fn for fn in os.listdir(params_dir)])
 
     with open(os.path.join(params_dir, f'{num_of_runs}.json'), 'w') as fp:
-        json.dump(params, fp, indent=4)
+        json.dump(params, fp, indent=4, skipkeys=True)
 
 
 def copy_source_files(record_dir):
@@ -99,3 +99,4 @@ def plot_learning_curves(history_path):
         plt.legend(['Train', 'Val'])
         plt.grid(True)
         plt.savefig(os.path.join(curves_dir, f'{key}.png'))
+        plt.close()

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.data import SegmentationDataset
-from .base import BaseConfig, BaseModel
+from .base import BaseConfig, BaseTrainer
 
 
 class MILDNetConfig(BaseConfig):
@@ -11,6 +11,9 @@ class MILDNetConfig(BaseConfig):
 
     # Input spatial size.
     input_size = (464, 464)
+
+    # Threshold for predicting contours.
+    contour_threshold = 0.3
 
     # Number of epochs for decaying auxillary loss.
     aux_decay_period = 8
@@ -88,7 +91,7 @@ class ASPP(nn.Module):
         return sum(getattr(self, f'branch_{idx}')(x) for idx in range(len(self.rates)))
 
 
-class MILDNet(BaseModel):
+class MILDNet(nn.Module):
     """
     MILD-Net: Minimal Information Loss Dilated Network for Gland Instance
     Segmentation in Colon Histology Images.
@@ -96,10 +99,9 @@ class MILDNet(BaseModel):
     See https://arxiv.org/pdf/1806.01963.pdf.
     """
 
-    def __init__(self, checkpoint=None):
+    def __init__(self):
         super().__init__()
 
-        self.config = MILDNetConfig()
         self.conv1_1 = nn.Conv2d(3, 64, 3, 1, 1)
         self.conv1_2 = nn.Conv2d(64, 64, 3, 1, 1)
         self.pool1 = nn.MaxPool2d(2, 2)
@@ -144,35 +146,6 @@ class MILDNet(BaseModel):
         self.cont_conv3 = nn.Conv2d(64, 2, 1, 1, 0)
 
         self.epoch = 0
-
-        if checkpoint is not None:
-            self.load_state_dict(checkpoint['model_state_dict'])
-            self.epoch = checkpoint['epoch']
-
-    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
-        if train:
-            return SegmentationDataset(root_dir, target_size=self.config.input_size,
-                                       contour=True, proportion=proportion)
-
-        return SegmentationDataset(root_dir, target_size=self.config.input_size, train=False)
-
-    def get_default_optimizer(self, checkpoint=None):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.config.initial_lr,
-                                     weight_decay=self.config.weight_decay)
-
-        if checkpoint is not None:
-            # load previous optimizer states
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-        return optimizer, None
-
-    def preprocess(self, *data, device='cpu'):
-        data = [datum.to(device) for datum in data]
-        if self.training:
-            img, mask, cont = data
-            return img, (mask.float(), cont.float())
-        else:
-            return data
 
     def forward(self, x):
         orig_img = x
@@ -223,6 +196,50 @@ class MILDNet(BaseModel):
 
         return obj, cont, aux_obj, aux_cont
 
+
+class MILDNetTrainer(BaseTrainer):
+    """Trainer for MILD-Net."""
+
+    def __init__(self, model, **kwargs):
+        """Initialize a MILDNetTrainer.
+
+        Kwargs:
+            input_size: input spatial size
+            contour_threshold: threshold for predicting contours
+            aux_decay_period: number of epochs for decaying auxillary loss
+            initial_lr: initial learning rate
+            weight_decay: weight decay for optimizer
+            epsilon: numerical stability term
+
+        Returns:
+            trainer: a new MILDNetTrainer instance
+        """
+
+        kwargs = {**MILDNetConfig().to_dict(), **kwargs}
+        super().__init__(model, **kwargs)
+
+    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
+        if train:
+            return SegmentationDataset(root_dir, target_size=self.kwargs.get('input_size'),
+                                       contour=True, proportion=proportion)
+
+        return SegmentationDataset(root_dir, train=False,
+                                   target_size=self.kwargs.get('input_size'))
+
+    def get_default_optimizer(self):
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.kwargs.get('initial_lr'),
+                                     weight_decay=self.kwargs.get('weight_decay'))
+
+        return optimizer, None
+
+    def preprocess(self, *data):
+        data = [datum.to(self.device) for datum in data]
+        if self.model.training:
+            img, mask, cont = data
+            return img, (mask.float(), cont.float())
+        else:
+            return data
+
     def compute_loss(self, pred, target, metrics=None):
         """Compute CWDS-MIL objective.
 
@@ -242,18 +259,18 @@ class MILDNet(BaseModel):
 
         obj, cont, aux_obj, aux_cont = pred
         obj_gt, cont_gt = target
-        aux_obj_gt = F.interpolate(obj_gt, scale_factor=1/8)
-        aux_cont_gt = F.interpolate(cont_gt, scale_factor=1/8)
+        aux_obj_gt = F.interpolate(obj_gt, scale_factor=1 / 8)
+        aux_cont_gt = F.interpolate(cont_gt, scale_factor=1 / 8)
 
         def cross_entropy(p, g):
-            return torch.mean(g * -torch.log(torch.clamp_min(p, min=self.config.epsilon)))
+            return torch.mean(g * -torch.log(torch.clamp_min(p, min=self.kwargs.get('epsilon'))))
 
         obj_loss = cross_entropy(obj, obj_gt)
         cont_loss = cross_entropy(cont, cont_gt)
         aux_obj_loss = cross_entropy(aux_obj, aux_obj_gt)
         aux_cont_loss = cross_entropy(aux_cont, aux_cont_gt)
 
-        decay = 0.1 ** (self.epoch // self.config.aux_decay_period)
+        decay = 0.1 ** (self.kwargs.get('epochs') // self.kwargs.get('aux_decay_period'))
         metrics['aux_decay'] = decay
 
         return obj_loss + cont_loss + decay * (aux_obj_loss + aux_cont_loss)
@@ -261,22 +278,17 @@ class MILDNet(BaseModel):
     def postprocess(self, pred, target=None):
         obj, cont, _, _ = pred
         obj = obj.round().long()
-        cont = cont.round().long()
+        cont = (cont > self.kwargs.get('contour_threshold')).long()
 
         # fusion of predicted objects and contours
-        pred = obj & (1 - cont)
+        pred = torch.argmax(obj & (1 - cont), dim=1)
 
         if target is not None:
-            if self.training:
+            if self.model.training:
                 target = target[0]
-            return pred.argmax(dim=1), target.argmax(dim=1)
+            return pred, target.argmax(dim=1)
 
         return pred
 
-    def save_checkpoint(self, ckpt_path, **kwargs):
-        """Save model checkpoint."""
-
-        torch.save({
-            'model_state_dict': self.state_dict(),
-            **kwargs,
-        }, ckpt_path)
+    def post_epoch_hook(self, epoch):
+        self.model.epoch = epoch

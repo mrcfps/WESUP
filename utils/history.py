@@ -46,6 +46,9 @@ class HistoryTracker:
     def save(self):
         """Save averaged metrics in this epoch to csv file."""
 
+        if self.save_path is None:
+            raise RuntimeError('cannot save history without setting save_path.')
+
         metrics = [sum(r) / len(r) for r in self.history.values()]
         if not os.path.exists(self.save_path):
             # create a new csv file
@@ -72,7 +75,8 @@ class HistoryTracker:
             for key in df.keys() if key not in ['lr', 'loss', 'val_loss']
         )
 
-        return underline('\nTraining Summary', style='=') + '\n' + metrics
+        return underline(
+            '\nTraining Summary (Avg over last 5 epochs)', style='=') + '\n' + metrics
 
 
 if __name__ == '__main__':
