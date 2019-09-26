@@ -1,3 +1,4 @@
+joblib
 fire
 numpy
 scipy

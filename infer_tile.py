@@ -2,48 +2,22 @@
 Inference module for window-based strategy.
 """
 
-import argparse
-import glob
 import math
 import os
 import os.path as osp
 from itertools import product
+from pathlib import Path
 
 import numpy as np
 import torch
 import torchvision.transforms.functional as TF
 
+import fire
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
 
-from models import initialize_model
-
-
-def build_cli_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_path', help='Path to dataset')
-    parser.add_argument('-m', '--model', default='mild',
-                        help='Which model to use')
-    parser.add_argument('-c', '--checkpoint', required=True,
-                        help='Path to checkpoint')
-    parser.add_argument('-p', '--patch-size', type=int, required=True,
-                        help='Size of input patches')
-    parser.add_argument('-d', '--device', default=('cuda' if torch.cuda.is_available() else 'cpu'),
-                        help='Which device to use')
-    parser.add_argument('-o', '--output',
-                        help='Path to store inference results')
-
-    return parser
-
-
-def _list_images(path):
-    """Glob all images within a directory."""
-
-    images = []
-    for ext in ("jpg", "jpeg", "png", "bmp"):
-        images.extend(glob.glob(osp.join(path, f"*.{ext}")))
-    return sorted(images)
+from models import initialize_trainer
 
 
 def _get_top_left_coordinates(height, width, patch_size):
@@ -116,11 +90,11 @@ def combine_patches_to_image(patches, target_height, target_width):
     return np.squeeze(combined[..., :-1])
 
 
-def predict(model, img_path, patch_size, device='cpu'):
+def predict(trainer, img_path, patch_size, device='cpu'):
     """Predict on a single input image.
 
     Arguments:
-        model: inference model (should be a `torch.nn.Module`)
+        trainer: trainer for inference
         img_path: instance of `torch.utils.data.Dataset`
         patch_size: patch size when feeding into network
         device: target device
@@ -135,7 +109,7 @@ def predict(model, img_path, patch_size, device='cpu'):
 
     for patch in patches:
         input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
-        prediction = model.postprocess(model(input_))
+        prediction = trainer.postprocess(trainer.model(input_))
         prediction = prediction.detach().cpu().numpy()
         predictions.append(prediction[..., np.newaxis])
 
@@ -164,17 +138,18 @@ def save_predictions(predictions, img_paths, output_dir='predictions'):
         Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
 
 
-def infer(model, data_dir, patch_size, output_dir=None, device='cpu'):
+def infer(trainer, data_dir, patch_size, output_dir=None, device='cpu'):
     """Making inference on a directory of images with given model checkpoint."""
 
     if output_dir is not None and not osp.exists(output_dir):
         os.mkdir(output_dir)
 
-    img_paths = _list_images(osp.join(data_dir, 'images'))
+    data_dir = Path(data_dir).expanduser()
+    img_paths = list((data_dir / 'images').iterdir())
 
     print(f'Predicting {len(img_paths)} images from {data_dir} ...')
     predictions = [
-        predict(model, img_path, patch_size, device=device)
+        predict(trainer, img_path, patch_size, device=device)
         for img_path in tqdm(img_paths)
     ]
 
@@ -184,18 +159,22 @@ def infer(model, data_dir, patch_size, output_dir=None, device='cpu'):
     return predictions
 
 
+def main(data_dir, model_type='mild', patch_size=464, checkpoint=None,
+         output_dir=None, device=None):
+
+    if output_dir is None and checkpoint is not None:
+        checkpoint = Path(checkpoint).expanduser()
+        output_dir = checkpoint.parent.parent / 'results'
+        if not output_dir.exists():
+            output_dir.mkdir()
+
+    device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+    trainer = initialize_trainer(model_type, device=device)
+    if checkpoint is not None:
+        trainer.load_checkpoint(checkpoint)
+
+    infer(trainer, data_dir, patch_size, output_dir, device=device)
+
+
 if __name__ == '__main__':
-    parser = build_cli_parser()
-    args = parser.parse_args()
-
-    device = args.device
-    output_dir = args.output
-    if output_dir is None:
-        output_dir = osp.abspath(osp.join(osp.dirname(args.checkpoint), '..', 'results'))
-
-    ckpt = torch.load(args.checkpoint)
-    model = initialize_model(args.model, checkpoint=ckpt)
-    model = model.to(device).eval()
-
-    infer(model, args.dataset_path, args.patch_size,
-          output_dir=output_dir, device=device)
+    fire.Fire(main)

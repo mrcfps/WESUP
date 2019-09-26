@@ -1,12 +1,10 @@
 import argparse
-import glob
 import os
-import os.path as osp
+from pathlib import Path
 import sys
 
-sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
+sys.path.append(str(Path(__file__).parent.parent))
 
-import numpy as np
 import pandas as pd
 from skimage.io import imread, imsave
 from joblib import Parallel, delayed
@@ -17,12 +15,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('pred_root')
 args = parser.parse_args()
 
-pred_root = args.pred_root
-new_pred_root = pred_root + '-new'
-if not osp.exists(new_pred_root):
-    os.mkdir(new_pred_root)
-    os.mkdir(osp.join(new_pred_root, 'testA'))
-    os.mkdir(osp.join(new_pred_root, 'testB'))
+glas_root = Path('~/data/GLAS_all').expanduser()
+pred_root = Path(args.pred_root).expanduser()
+new_pred_root = pred_root.parent / (pred_root.name + '-new')
+if not new_pred_root.exists():
+    new_pred_root.mkdir()
+    (new_pred_root / 'testA').mkdir()
+    (new_pred_root / 'testB').mkdir()
 
 executor = Parallel(n_jobs=os.cpu_count())
 
@@ -65,7 +64,7 @@ def compute_metrics(predictions, gts, pred_paths):
     df['detection_f1'] = detection_f1s
     df['object_dice'] = object_dices
     df['object_hausdorff'] = object_hausdorffs
-    df.index = [osp.basename(pred_path) for pred_path in pred_paths]
+    df.index = [pred_path.name for pred_path in pred_paths]
 
     return df
 
@@ -73,27 +72,27 @@ def compute_metrics(predictions, gts, pred_paths):
 print('Test A')
 
 print('\nReading predictions and gts ...')
-pred_paths = sorted(glob.glob(osp.join(pred_root, 'testA', '*.bmp')))
-predictions = executor(delayed(postprocess)(imread(pred_path) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data/GLAS_all/testA/masks/*.bmp')))
+pred_paths = sorted((pred_root / 'testA').glob('*.bmp'))
+predictions = executor(delayed(postprocess)(imread(str(pred_path)) / 255) for pred_path in pred_paths)
+gts = executor(delayed(imread)(gt_path) for gt_path in sorted((glas_root / 'testA' / 'masks').glob('*.bmp')))
 
 print('Saving new predictions ...')
 for pred, pred_path in zip(predictions, pred_paths):
-    imsave(pred_path.replace(pred_root, pred_root + '-new'), (pred * 255).astype('uint8'))
+    imsave(new_pred_root / 'testA' / pred_path.name, (pred * 255).astype('uint8'))
 
 metrics = compute_metrics(predictions, gts, pred_paths)
-metrics.to_csv(osp.join(pred_root, 'testA.csv'))
+metrics.to_csv(pred_root / 'testA.csv')
 
 print('\nTest B')
 
 print('\nReading predictions and gts ...')
-pred_paths = sorted(glob.glob(osp.join(pred_root, 'testB', '*.bmp')))
-predictions = executor(delayed(postprocess)(imread(pred_path) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('data/GLAS_all/testB/masks/*.bmp')))
+pred_paths = sorted((pred_root / 'testB').glob('*.bmp'))
+predictions = executor(delayed(postprocess)(imread(str(pred_path)) / 255) for pred_path in pred_paths)
+gts = executor(delayed(imread)(gt_path) for gt_path in sorted((glas_root / 'testB' / 'masks').glob('*.bmp')))
 
 print('Saving new predictions ...')
 for pred, pred_path in zip(predictions, pred_paths):
-    imsave(pred_path.replace(pred_root, pred_root + '-new'), (pred * 255).astype('uint8'))
+    imsave(new_pred_root / 'testB' / pred_path.name, (pred * 255).astype('uint8'))
 
 metrics = compute_metrics(predictions, gts, pred_paths)
-metrics.to_csv(osp.join(pred_root, 'testB.csv'))
+metrics.to_csv(pred_root / 'testB.csv')
