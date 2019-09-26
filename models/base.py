@@ -67,7 +67,7 @@ class BaseTrainer(ABC):
         self.record_dir = None
         self.tracker = HistoryTracker()
         self.dataloaders = None
-        self.optimizer, self.scheduler = self.get_default_optimizer()
+        self.optimizer, self.scheduler = None, None
         self.metric_funcs = []
 
     @abstractmethod
@@ -134,7 +134,9 @@ class BaseTrainer(ABC):
 
             self.initial_epoch = checkpoint['epoch'] + 1
             self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+            if self.optimizer is not None:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
             if self.scheduler is not None:
                 self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -150,11 +152,15 @@ class BaseTrainer(ABC):
             kwargs: additional information to be included in the checkpoint object
         """
 
-        torch.save({
+        checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             **kwargs,
-        }, ckpt_path)
+        }
+        if self.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+
+        torch.save(checkpoint, ckpt_path)
 
     def postprocess(self, pred, target=None):
         """Postprocess raw prediction and target before calling `evaluate` method.
@@ -254,6 +260,7 @@ class BaseTrainer(ABC):
         # Merge configurations.
         self.kwargs = {**self.kwargs, **kwargs}
 
+        self.optimizer, self.scheduler = self.get_default_optimizer()
         self.load_checkpoint(self.kwargs.get('checkpoint'))
         self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))
         serializable_kwargs = {
@@ -314,7 +321,7 @@ class BaseTrainer(ABC):
 
         self.logger.info(self.tracker.report())
 
-    def evaluate(self, pred, target, verbose=False):
+    def evaluate(self, pred, target=None, verbose=False):
         """Running several metrics to evaluate model performance.
 
         Args:
@@ -325,6 +332,9 @@ class BaseTrainer(ABC):
         Returns:
             metrics: a dictionary containing all metrics
         """
+
+        if target is None:
+            return dict()
 
         metrics = defaultdict(list)
 
