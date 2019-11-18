@@ -30,13 +30,13 @@ def postprocess(pred):
     regions = label(pred)
     for region_idx in range(regions.max() + 1):
         region_mask = regions == region_idx
-        if region_mask.sum() < 1000:
+        if region_mask.sum() < 2000:
             pred[region_mask] = 0
 
     revert_regions = label(1 - pred)
     for region_idx in range(revert_regions.max() + 1):
         region_mask = revert_regions == region_idx
-        if region_mask.sum() < 1000:
+        if region_mask.sum() < 2000:
             pred[region_mask] = 1
 
     return pred

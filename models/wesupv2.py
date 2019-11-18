@@ -3,14 +3,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.data import SegmentationDataset
+from utils.data import WESUPV2Dataset
 from .base import BaseConfig, BaseTrainer
 
 
-class MILDNetConfig(BaseConfig):
-    """Configuration for CWDS-MIL model."""
+class WESUPV2Config(BaseConfig):
+    """Configuration for WESUPV2 model."""
 
     # Input spatial size.
-    input_size = (400, 400)
+    input_size = (280, 400)
+
+    # Output dimension of concatenated feature maps.
+    D = 8
+
+    # Feature map size.
+    fm_size = (35, 50)
+
+    beta = 2
+
+    transition_iterations = 4
 
     # Threshold for predicting contours.
     contour_threshold = 0.3
@@ -91,7 +102,7 @@ class ASPP(nn.Module):
         return sum(getattr(self, f'branch_{idx}')(x) for idx in range(len(self.rates)))
 
 
-class MILDNet(nn.Module):
+class WESUPV2(nn.Module):
     """
     MILD-Net: Minimal Information Loss Dilated Network for Gland Instance
     Segmentation in Colon Histology Images.
@@ -99,8 +110,15 @@ class MILDNet(nn.Module):
     See https://arxiv.org/pdf/1806.01963.pdf.
     """
 
-    def __init__(self):
+    def __init__(self, D=32, fm_size=(280, 400), **kwargs):
+        """Initialize WESUPV2.
+
+        Args:
+            D: # channels of fused output feature map
+        """
+
         super().__init__()
+        self.fm_size = fm_size
 
         self.conv1_1 = nn.Conv2d(3, 64, 3, 1, 1)
         self.conv1_2 = nn.Conv2d(64, 64, 3, 1, 1)
@@ -122,6 +140,10 @@ class MILDNet(nn.Module):
         self.dilated_res3 = ResidualUnit(512, 512, dilation_rate=4)
         self.dilated_res4 = ResidualUnit(512, 512, dilation_rate=4)
 
+        # cross convolutions
+        self.cross_conv1 = nn.Conv2d(3968, 512, 3, 1, 1)
+        self.cross_conv2 = nn.Conv2d(512, D, 3, 1, 1)
+
         self.aux_obj_conv = nn.Conv2d(512, 2, 1, 1, 0)
         self.aux_cont_conv = nn.Conv2d(512, 2, 1, 1, 0)
 
@@ -139,12 +161,6 @@ class MILDNet(nn.Module):
         self.obj_dropout = nn.Dropout2d(p=0.5)
         self.obj_conv3 = nn.Conv2d(64, 2, 1, 1, 0)
 
-        # contour branch
-        self.cont_conv1 = nn.Conv2d(128 + 64, 64, 3, 1, 1)
-        self.cont_conv2 = nn.Conv2d(64, 64, 3, 1, 1)
-        self.cont_dropout = nn.Dropout2d(p=0.5)
-        self.cont_conv3 = nn.Conv2d(64, 2, 1, 1, 0)
-
         self.epoch = 0
 
     def forward(self, x):
@@ -152,26 +168,38 @@ class MILDNet(nn.Module):
         h = x
 
         h = F.relu(self.conv1_1(h))
+        fmaps = F.interpolate(h, self.fm_size)
         h = F.relu(self.conv1_2(h))
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         low1 = h
         h = self.pool1(h)
 
-        h = self.res1(self.mil1(h, F.interpolate(orig_img, scale_factor=0.5)))
+        h = self.mil1(h, F.interpolate(orig_img, scale_factor=0.5))
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
+        h = self.res1(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         low2 = h
         h = self.pool2(h)
 
-        h = self.res2(self.mil2(h, F.interpolate(orig_img, scale_factor=0.25)))
+        h = self.mil2(h, F.interpolate(orig_img, scale_factor=0.25))
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
+        h = self.res2(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         low3 = h
         h = self.pool3(h)
 
-        h = self.res3(self.mil3(h, F.interpolate(orig_img, scale_factor=0.125)))
+        h = self.mil3(h, F.interpolate(orig_img, scale_factor=0.125))
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
+        h = self.res3(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         h = self.dilated_res1(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         h = self.dilated_res2(h)
-        aux_obj = F.softmax(self.aux_obj_conv(h), dim=1)
-        aux_cont = F.softmax(self.aux_cont_conv(h), dim=1)
-
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         h = self.dilated_res3(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         h = self.dilated_res4(h)
+        fmaps = torch.cat([fmaps, F.interpolate(h, self.fm_size)], dim=1)
         h = self.aspp(h)
 
         h = torch.cat([F.interpolate(h, scale_factor=2), low3], dim=1)
@@ -184,27 +212,26 @@ class MILDNet(nn.Module):
 
         h = torch.cat([F.interpolate(h, scale_factor=2), low1], dim=1)
 
-        obj = F.relu(self.obj_conv1(h))
-        obj = F.relu(self.obj_conv2(obj))
-        obj = self.obj_conv3(self.obj_dropout(obj))
-        obj = F.softmax(obj, dim=1)
+        h = F.relu(self.obj_conv1(h))
+        h = F.relu(self.obj_conv2(h))
+        h = self.obj_conv3(self.obj_dropout(h))
+        h = F.softmax(h, dim=1)
 
-        cont = F.relu(self.cont_conv1(h))
-        cont = F.relu(self.cont_conv2(cont))
-        cont = self.cont_conv3(self.cont_dropout(cont))
-        cont = F.softmax(cont, dim=1)
+        fmaps = F.relu(self.cross_conv1(fmaps))
+        fmaps = F.relu(self.cross_conv2(fmaps))
 
-        return obj, cont, aux_obj, aux_cont
+        return h, fmaps
 
 
-class MILDNetTrainer(BaseTrainer):
-    """Trainer for MILD-Net."""
+class WESUPV2Trainer(BaseTrainer):
+    """Trainer for WESUPV2."""
 
     def __init__(self, model, **kwargs):
         """Initialize a MILDNetTrainer.
 
         Kwargs:
             input_size: input spatial size
+            transition_iteration: number of iterations for random walk transition
             contour_threshold: threshold for predicting contours
             aux_decay_period: number of epochs for decaying auxillary loss
             initial_lr: initial learning rate
@@ -215,13 +242,13 @@ class MILDNetTrainer(BaseTrainer):
             trainer: a new MILDNetTrainer instance
         """
 
-        kwargs = {**MILDNetConfig().to_dict(), **kwargs}
+        kwargs = {**WESUPV2Config().to_dict(), **kwargs}
         super().__init__(model, **kwargs)
 
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
-            return SegmentationDataset(root_dir, target_size=self.kwargs.get('input_size'),
-                                       contour=True, proportion=proportion)
+            return WESUPV2Dataset(root_dir, target_size=self.kwargs.get('input_size'),
+                                  proportion=proportion)
 
         return SegmentationDataset(root_dir, train=False,
                                    target_size=self.kwargs.get('input_size'))
@@ -235,60 +262,66 @@ class MILDNetTrainer(BaseTrainer):
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
         if self.model.training:
-            img, mask, cont = data
-            return img, (mask.float(), cont.float())
+            img, mask, coords = data
+            return img, (mask.float(), coords)
         else:
             return data
 
     def compute_loss(self, pred, target, metrics=None):
-        """Compute CWDS-MIL objective.
+        """Compute WESUPV2 objective.
 
         Args:
             pred: model prediction with following elements:
-                1) final object prediction of size (B, C, H, W)
-                2) final contour prediction of size (B, C, H, W)
-                3) auxillary object prediction of size (B, C, H/8, W/8)
-                4) auxillary contour prediction of size (B, C, H/8, W/8)
+                1) segmentation prediction (B, C, H_o, W_o)
+                2) feature maps of size (B, D, H_f, W_f)
             target: a tuple containing following elements:
-                1) object ground truth of size (B, C, H, W)
-                2) contour ground truth of size (B, C, H, W)
+                1) partially labeled mask of size (B, C, H_o, W_o)
+                2) coordinates array of size (B, 2, H_o x W_o)
 
         Returns:
             loss: loss for side outputs and fused output
         """
 
-        obj, cont, aux_obj, aux_cont = pred
-        obj_gt, cont_gt = target
-        aux_obj_gt = F.interpolate(obj_gt, scale_factor=1 / 8)
-        aux_cont_gt = F.interpolate(cont_gt, scale_factor=1 / 8)
+        h, fmaps = pred
+        mask, coords = target
+        batch, D, height_f, width_f = fmaps.size()
+        _, C, height_o, width_o = mask.size()
 
-        def cross_entropy(p, g):
-            return torch.mean(g * -torch.log(torch.clamp_min(p, min=self.kwargs.get('epsilon'))))
+        # compute feature-wise affinity matrix
+        fmaps = fmaps.view(batch, D, 1, -1)
+        fmaps_p = fmaps.view(batch, D, -1, 1)
+        feature_aff = torch.exp(-torch.einsum('ijkl,ijkl->ikl',
+                                              fmaps - fmaps_p, fmaps - fmaps_p) / 2)
 
-        obj_loss = cross_entropy(obj, obj_gt)
-        cont_loss = cross_entropy(cont, cont_gt)
-        aux_obj_loss = cross_entropy(aux_obj, aux_obj_gt)
-        aux_cont_loss = cross_entropy(aux_cont, aux_cont_gt)
+        # compute spatial adjacency matrix
+        coords = F.interpolate(coords, fmaps.size()[2:], mode='bilinear',
+                               align_corners=True)
+        coords = coords.view(batch, 2, 1, -1)
+        coords_p = coords.view(batch, 2, -1, 1)
+        coords_aff = torch.exp(-torch.einsum('ijkl,ijkl->ikl',
+                                             coords - coords_p, coords - coords_p) / 2)
 
-        decay = 0.1 ** (self.kwargs.get('epochs') // self.kwargs.get('aux_decay_period'))
-        metrics['aux_decay'] = decay
+        # TODO: check if matrix aff is all ones on diagonal.
+        aff = feature_aff * coords_aff
+        aff = torch.pow(aff, self.kwargs.get('beta'))  # (B, H x W, H x W)
+        transition = aff / aff.sum(dim=1, keepdim=True)  # (B, H x W, H x W)
+        mask = F.interpolate(mask, (height_f, width_f), mode='nearest')
+        mask = mask.view(batch, -1, height_f * width_f).float()  # (B, C, H x W)
 
-        return obj_loss + cont_loss + decay * (aux_obj_loss + aux_cont_loss)
+        for _ in range(self.kwargs.get('transition_iterations')):
+            mask = torch.bmm(mask, transition)  # (B, C, H x W)
+
+        mask = mask.view(batch, C, height_f, width_f)
+        mask = F.interpolate(mask, (height_o, width_o),
+                             mode='bilinear', align_corners=True)
+
+        h = torch.clamp(h, self.kwargs.get('epsilon'), 1 - self.kwargs.get('epsilon'))
+
+        return torch.sum(mask * -torch.log(h)) / mask.nonzero().size(0)
 
     def postprocess(self, pred, target=None):
-        obj, cont, _, _ = pred
-        obj = obj.round().long()
-        cont = (cont > self.kwargs.get('contour_threshold')).long()
+        pred = pred[0].round().long()
 
-        # fusion of predicted objects and contours
-        pred = torch.argmax(obj & (1 - cont), dim=1)
-
-        if target is not None:
-            if self.model.training:
-                target = target[0]
-            return pred, target.argmax(dim=1)
-
-        return pred
-
-    def post_epoch_hook(self, epoch):
-        self.model.epoch = epoch
+        if self.model.training:
+            return pred, None
+        return pred, target.argmax(dim=1)

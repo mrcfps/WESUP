@@ -2,6 +2,10 @@ import argparse
 import glob
 import os
 import os.path as osp
+from pathlib import Path
+import sys
+
+sys.path.append(str(Path(__file__).parent.parent))
 
 import numpy as np
 from skimage.io import imread, imsave
@@ -58,7 +62,7 @@ def compute_metrics(iterable):
 print('Reading predictions and gts ...')
 pred_paths = sorted(glob.glob(osp.join(pred_root, '*.png')))
 predictions = executor(delayed(postprocess)(imread(pred_path) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('CRAG/test/masks/*.png')))
+gts = executor(delayed(imread)(gt_path) for gt_path in sorted(glob.glob('/home/mrc/data/CRAG/test/masks/*.png')))
 
 print('Saving new predictions ...')
 for pred, pred_path in zip(predictions, pred_paths):

@@ -3,16 +3,17 @@ Data loading utilities.
 """
 
 import csv
-import glob
+from functools import partial
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pandas as pd
 import albumentations as A
-from PIL import Image
+from skimage.io import imread
 from skimage.segmentation import find_boundaries
 from skimage.morphology import dilation
+from skimage.transform import resize
 
 import torch
 from torch.utils.data import Dataset
@@ -20,14 +21,12 @@ import torchvision.transforms.functional as TF
 
 from . import empty_tensor
 
+resize_mask = partial(resize, order=0, preserve_range=True, anti_aliasing=False)
 
-def _list_images(path):
-    """Glob all images within a directory."""
 
-    images = []
-    for ext in ("jpg", "jpeg", "png", "bmp"):
-        images.extend(path.glob(f"*.{ext}"))
-    return sorted(images)
+def resize_img(img, target_size):
+    img = resize(img, target_size, order=1, anti_aliasing=False)
+    return (img * 255).astype('uint8')
 
 
 class SegmentationDataset(Dataset):
@@ -56,15 +55,15 @@ class SegmentationDataset(Dataset):
             seed: random seed
         """
 
-        self.root_dir = Path(root_dir)
+        self.root_dir = Path(root_dir).expanduser()
 
         # path to original images
-        self.img_paths = _list_images(self.root_dir / 'images')
+        self.img_paths = sorted((self.root_dir / 'images').iterdir())
 
         # path to mask annotations (optional)
         self.mask_paths = None
         if (self.root_dir / 'masks').exists():
-            self.mask_paths = _list_images(self.root_dir / 'masks')
+            self.mask_paths = sorted((self.root_dir / 'masks').iterdir())
 
         self.mode = mode or 'mask' if self.mask_paths is not None else None
 
@@ -92,25 +91,26 @@ class SegmentationDataset(Dataset):
         return int(self.proportion * len(self.img_paths))
 
     def _resize_image_and_mask(self, img, mask=None):
+        height, width = img.shape[:2]
         if self.target_size is not None:
             target_height, target_width = self.target_size
         elif self.multiscale_range is not None:
             self.rescale_factor = np.random.uniform(*self.multiscale_range)
-            target_height = int(np.ceil(self.rescale_factor * img.height))
-            target_width = int(np.ceil(self.rescale_factor * img.width))
+            target_height = int(np.ceil(self.rescale_factor * height))
+            target_width = int(np.ceil(self.rescale_factor * width))
         elif self.rescale_factor is not None:
-            target_height = int(np.ceil(self.rescale_factor * img.height))
-            target_width = int(np.ceil(self.rescale_factor * img.width))
+            target_height = int(np.ceil(self.rescale_factor * height))
+            target_width = int(np.ceil(self.rescale_factor * width))
         else:
-            target_height, target_width = img.height, img.width
+            target_height, target_width = height, width
 
-        img = img.resize((target_width, target_height), resample=Image.BILINEAR)
+        img = resize_img(img, (target_height, target_width))
 
         # pixel-level annotation mask
         if mask is not None:
-            mask = mask.resize((target_width, target_height), resample=Image.NEAREST)
+            mask = resize_mask(mask, (target_height, target_width))
 
-        return np.array(img), np.array(mask)
+        return img, mask
 
     def _augment(self, *data):
         img, mask = data
@@ -134,7 +134,6 @@ class SegmentationDataset(Dataset):
     def _convert_image_and_mask_to_tensor(self, img, mask):
         img = TF.to_tensor(img)
         if mask is not None:
-            mask = np.array(mask)
             if self.contour:
                 cont = dilation(find_boundaries(mask))
             mask = np.concatenate([np.expand_dims(mask == i, 0)
@@ -153,10 +152,10 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         idx = self.picked[idx]
-        img = Image.open(self.img_paths[idx])
+        img = imread(str(self.img_paths[idx]))
         mask = None
         if self.mask_paths is not None:
-            mask = Image.open(self.mask_paths[idx])
+            mask = imread(str(self.mask_paths[idx]))
         img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
@@ -242,11 +241,11 @@ class AreaConstraintDataset(SegmentationDataset):
 
     def __getitem__(self, idx):
         idx = self.picked[idx]
-        img = Image.open(self.img_paths[idx])
+        img = imread(str(self.img_paths[idx]))
 
         mask = None
         if self.mask_paths is not None:
-            mask = Image.open(self.mask_paths[idx])
+            mask = imread(str(self.mask_paths[idx]))
         img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
@@ -318,19 +317,20 @@ class PointSupervisionDataset(SegmentationDataset):
 
         augmented = appearance_transformer(image=img, mask=mask)
         temp_img, temp_mask = augmented['image'], augmented['mask']
+
         augmented = position_transformer(image=temp_img, mask=temp_mask, keypoints=points)
 
         return augmented['image'], augmented.get('mask', None), augmented.get('keypoints', None)
 
     def __getitem__(self, idx):
         idx = self.picked[idx]
-        img = Image.open(self.img_paths[idx])
+        img = imread(str(self.img_paths[idx]))
 
         pixel_mask = None
         if self.mask_paths is not None:
-            pixel_mask = Image.open(self.mask_paths[idx])
+            pixel_mask = imread(str(self.mask_paths[idx]))
 
-        orig_height, orig_width = img.height, img.width
+        orig_height, orig_width = img.shape[:2]
         img, pixel_mask = self._resize_image_and_mask(img, pixel_mask)
 
         # how much we would like to rescale coordinates of each point
@@ -343,7 +343,7 @@ class PointSupervisionDataset(SegmentationDataset):
             rescaler = np.array([[self.rescale_factor, self.rescale_factor, 1]])
 
         # read points from csv file
-        with open(self.point_paths[idx]) as fp:
+        with open(str(self.point_paths[idx])) as fp:
             points = np.array([[int(d) for d in point]
                                for point in csv.reader(fp)])
             points = np.floor(points * rescaler).astype('int')
@@ -363,6 +363,39 @@ class PointSupervisionDataset(SegmentationDataset):
         img, pixel_mask = self._convert_image_and_mask_to_tensor(img, pixel_mask)
 
         return img, pixel_mask, point_mask
+
+
+class WESUPV2Dataset(SegmentationDataset):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if (self.root_dir / 'spl-masks').exists():
+            self.mask_paths = sorted((self.root_dir / 'spl-masks').iterdir())
+
+    def _generate_coords(self, shape):
+        x = np.linspace(0, 1, shape[0])
+        y = np.linspace(0, 1, shape[1])
+        coords = torch.as_tensor([np.tile(x, len(y)), np.repeat(y, len(x))],
+                                 dtype=torch.float32)
+
+        return coords.view(2, shape[0], shape[1])
+
+    def __getitem__(self, idx):
+        idx = self.picked[idx]
+        img = imread(str(self.img_paths[idx]))
+        mask = None
+        if self.mask_paths is not None:
+            mask = np.load(self.mask_paths[idx])
+        img, mask = self._resize_image_and_mask(img, mask)
+
+        if self.train:
+            img, mask = self._augment(img, mask)
+
+        coords = self._generate_coords(img.shape)
+        img = TF.to_tensor(img)
+        mask = torch.as_tensor(mask.transpose(2, 0, 1), dtype=torch.long)
+
+        return img, mask, coords
 
 
 class CompoundDataset(Dataset):

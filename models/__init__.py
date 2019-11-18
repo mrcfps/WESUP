@@ -6,14 +6,15 @@ sys.path.append(str(Path(__file__).parent.parent.absolute()))
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
 from .mild_net import MILDNet, MILDNetConfig, MILDNetTrainer
 from .wesup import WESUP, WESUPConfig, WESUPTrainer
+from .wesupv2 import WESUPV2, WESUPV2Config, WESUPV2Trainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 
 
 def initialize_trainer(model_type, **kwargs):
-    """Initialize a model.
+    """Initialize a trainer for model.
 
     Args:
-        model_type: either 'wesup', 'cdws' 'sizeloss' or 'mild'
+        model_type: either 'wesup', 'wesupv2, 'cdws' 'sizeloss' or 'mild'
         kwargs: additional training config
 
     Returns:
@@ -24,6 +25,10 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**WESUPConfig().to_dict(), **kwargs}
         model = WESUP(**kwargs)
         trainer = WESUPTrainer(model, **kwargs)
+    elif model_type == 'wesupv2':
+        kwargs = {**WESUPV2Config().to_dict(), **kwargs}
+        model = WESUPV2(**kwargs)
+        trainer = WESUPV2Trainer(model, **kwargs)
     elif model_type == 'cdws':
         kwargs = {**CDWSConfig().to_dict(), **kwargs}
         model = CDWS(**kwargs)

@@ -21,7 +21,7 @@ def prepare_record_dir():
 
     record_root = Path.home() / 'records'
     if os.environ.get('RECORD_ROOT'):
-        record_root = os.environ.get('RECORD_ROOT')
+        record_root = Path(os.environ.get('RECORD_ROOT')).expanduser()
 
     if not record_root.exists():
         record_root.mkdir()

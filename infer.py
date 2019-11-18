@@ -53,7 +53,7 @@ def predict(trainer, dataset, input_size=None, scales=(0.5,),
     dataloader = torch.utils.data.DataLoader(dataset, num_workers=num_workers)
 
     size_info = f'input size {input_size}' if input_size else f'scales {scales}'
-    print(f'\nPredicting {len(dataset)} images with scales {size_info} ...')
+    print(f'\nPredicting {len(dataset)} images with {size_info} ...')
 
     predictions = []
     for data in tqdm(dataloader, total=len(dataset)):
@@ -121,7 +121,7 @@ def infer(trainer, data_dir, output_dir=None, input_size=None,
     """Making inference on a directory of images with given model checkpoint."""
 
     trainer.model.eval()
-    dataset = SegmentationDataset(data_dir, target_size=input_size, train=False)
+    dataset = SegmentationDataset(data_dir, train=False)
 
     predictions = predict(trainer, dataset, input_size=input_size, scales=scales,
                           num_workers=num_workers, device=device)
@@ -134,9 +134,6 @@ def infer(trainer, data_dir, output_dir=None, input_size=None,
 
 def main(data_dir, model_type='wesup', checkpoint=None, output_dir=None,
          input_size=None, scales=(0.5,), num_workers=4, device=None):
-    if input_size is not None:
-        input_size = [int(s) for s in input_size.split(',')]
-
     if output_dir is None and checkpoint is not None:
         checkpoint = Path(checkpoint)
         output_dir = checkpoint.parent.parent / 'results'

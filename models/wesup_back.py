@@ -23,13 +23,14 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
         mask (optional): annotation mask tensor with shape (C, H, W). Each pixel is a one-hot
             encoded label vector. If this vector is all zeros, then its class is unknown.
     Returns:
-        sp_maps: superpixel maps with shape (N, H, W)
-        sp_centroids: normalized superpixel centroids with shape (N, 2)
-        sp_labels: superpixel labels with shape (N_l, C), where N_l is the number of labeled samples.
+        sp_maps: superpixel maps with shape (n_superpixels, H, W)
+        sp_labels: superpixel labels with shape (n_labels, C), only when `mask` is given.
+            `n_labels` could be smaller than `n_superpixels` in the case of point supervision,
+            where `sp_labels` correspond to labels of the first `n_labels` superpixels.
     """
 
     # ordering of superpixels
-    sp_idx_list = segments.unique()
+    sp_idx_list = range(segments.max() + 1)
 
     if mask is not None and not is_empty_tensor(mask):
 
@@ -55,19 +56,12 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
         sp_labels = empty_tensor().to(segments.device)
 
     # stacking normalized superpixel segment maps
-    sp_maps = segments == sp_idx_list[:, None, None]
+    sp_maps = torch.cat(
+        [(segments == sp_idx).unsqueeze(0) for sp_idx in sp_idx_list])
     sp_maps = sp_maps.squeeze().float()
-
-    # compute normalized superpixel centroids
-    sp_centroids = torch.cat(
-        [sp_map.nonzero().float().mean(dim=0).unsqueeze(0) for sp_map in sp_maps])
-    sp_centroids[:, 0] /= segments.size(0)
-    sp_centroids[:, 1] /= segments.size(1)
-
-    # make sure each superpixel map sums to one
     sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
 
-    return sp_maps, sp_centroids, sp_labels
+    return sp_maps, sp_labels
 
 
 def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
@@ -103,43 +97,30 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
     return torch.sum(ce) / labeled_samples
 
 
-def _label_propagate(features, centroids, y_l, threshold=0.95):
-    """Perform random walk based label propagation with similarity graph.
+def _label_propagate(X, y_l, threshold=0.95):
+    """Perform label propagation with similiarity graph.
 
     Arguments:
-        features: features of size (N, D), where N is the number of superpixels
-            and D is the dimension of input features
-        centroids: centroids of size (N, 2), where each centroid is a coordinate (x, y)
-            (both x and y are between 0 and 1)
-        y_l: label tensor of size (N, C), where C is the number of classes
+        X: input tensor of size (n_l + n_u, d), where n_l is number of labeled samples,
+            n_u is number of unlabeled samples and d is the dimension of input
+        y_l: label tensor of size (n_l, c), where c is the number of classes
         threshold: similarity threshold for label propagation
 
     Returns:
-        pseudo_labels: propagated label tensor of size (N, C)
+        y_u: propagated label tensor of size (n_u, c)
     """
 
     # disable gradient computation
-    features = features.detach()
-    centroids = centroids.detach()
+    X = X.detach()
     y_l = y_l.detach()
 
     # number of labeled and unlabeled samples
     n_l = y_l.size(0)
-    n_u = features.size(0) - n_l
+    n_u = X.size(0) - n_l
 
-    # feature affinity matrix
-    feature_aff = torch.exp(-torch.einsum('ijk,ijk->ij',
-                                          features - features.unsqueeze(1),
-                                          features - features.unsqueeze(1)))
-
-    # space affinity matrix
-    # space_aff = torch.exp(-torch.einsum('ijk,ijk->ij',
-    #                                     centroids - centroids.unsqueeze(1),
-    #                                     centroids - centroids.unsqueeze(1)))
-
-    # the final affinity matrix and transition matrix
-    # W = feature_aff * space_aff  # (N, N)
-    W = feature_aff
+    # compute similarity matrix W
+    Xp = X.view(X.size(0), 1, X.size(1))
+    W = torch.exp(-torch.einsum('ijk, ijk->ij', X - Xp, X - Xp))
 
     # sub-matrix of W containing similarities between labeled and unlabeled samples
     W_ul = W[n_l:, :n_l]
@@ -180,8 +161,8 @@ class WESUPConfig(BaseConfig):
     # whether to enable label propagation
     enable_propagation = True
 
-    # Weight for label-propagated samples when computing loss function
-    propagate_threshold = 0.8
+    # Threshold for label propagation
+    propagate_threshold = 0.95
 
     # Weight for label-propagated samples when computing loss function
     propagate_weight = 0.5
@@ -201,12 +182,11 @@ class WESUPConfig(BaseConfig):
 class WESUP(nn.Module):
     """Weakly supervised histopathology image segmentation with sparse point annotations."""
 
-    def __init__(self, n_classes=2, D=16, **kwargs):
+    def __init__(self, **kwargs):
         """Initialize a WESUP model.
 
         Kwargs:
             n_classes: number of target classes (default to 2)
-            D: output dimension of superpixel features
 
         Returns:
             model: a new WESUP model
@@ -215,37 +195,43 @@ class WESUP(nn.Module):
         super().__init__()
 
         self.kwargs = kwargs
-        self.backbone = models.vgg16(pretrained=True).features
+        self.backbone = models.vgg16(pretrained=True).features[:-1]
 
-        # sum of channels of all feature maps
-        self.fm_channels_sum = 0
+        side_conv_idx = 0  # index of side conv layer
+        fm_channels_num = 0
 
         # side convolution layers after each conv feature map
-        for layer in self.backbone:
-            if isinstance(layer, nn.Conv2d):
+        for idx, layer in enumerate(self.backbone):
+            if isinstance(layer, nn.ReLU):
                 layer.register_forward_hook(self._hook_fn)
-                setattr(self, f'side_conv{self.fm_channels_sum}',
-                        nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1))
-                self.fm_channels_sum += layer.out_channels // 2
+
+                # fetch the number of output channels
+                conv_layer = self.backbone[idx - 1]
+                out_channels = conv_layer.out_channels
+
+                setattr(self, f'side_conv{side_conv_idx}',
+                        nn.Conv2d(out_channels, out_channels // 2, 1))
+                side_conv_idx += 1
+                fm_channels_num += out_channels // 2
 
         # fully-connected layers for dimensionality reduction
         self.fc_layers = nn.Sequential(
-            nn.Linear(self.fm_channels_sum, 1024),
+            nn.Linear(fm_channels_num, 1024),
             nn.ReLU(),
             nn.Linear(1024, 1024),
             nn.ReLU(),
-            nn.Linear(1024, D),
+            nn.Linear(1024, 32),
             nn.ReLU()
         )
 
         # final softmax classifier
         self.classifier = nn.Sequential(
-            nn.Linear(D, self.kwargs.get('n_classes', 2)),
+            nn.Linear(32, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
         )
 
         # store conv feature maps
-        self.feature_maps = None
+        self.feature_maps = []
 
         # spatial size of first feature map
         self.fm_size = None
@@ -257,21 +243,17 @@ class WESUP(nn.Module):
         self.sp_pred = None
 
     def _hook_fn(self, _, input_, output):
-        if self.feature_maps is None:
+        if len(self.feature_maps) == 0:
             self.fm_size = (input_[0].size(2), input_[0].size(3))
-            side_conv_name = 'side_conv0'
-        else:
-            side_conv_name = f'side_conv{self.feature_maps.size(0)}'
 
-        output = getattr(self, side_conv_name)(output.clone())
+        self.feature_maps.append(output)
+
+    def _process_single_feature_map(self, fm_idx):
+        side_conv_layer = getattr(self, f'side_conv{fm_idx}')
+        output = side_conv_layer(self.feature_maps[fm_idx])
         output = F.interpolate(output, self.fm_size,
                                mode='bilinear', align_corners=True)
-
-        if self.feature_maps is None:
-            self.feature_maps = output.squeeze()
-        else:
-            self.feature_maps = torch.cat(
-                (self.feature_maps, output.squeeze()))
+        return output.squeeze()
 
     def forward(self, x):
         """Running a forward pass.
@@ -285,11 +267,17 @@ class WESUP(nn.Module):
         """
 
         x, sp_maps = x
-        n_superpixels, height, width = sp_maps.size()
+        _, height, width = sp_maps.size()
 
         # extract conv feature maps and flatten
-        self.feature_maps = None
+        self.feature_maps = []
         _ = self.backbone(x)
+
+        self.feature_maps = torch.cat([
+            self._process_single_feature_map(fm_idx)
+            for fm_idx in range(len(self.feature_maps))
+        ])
+
         x = self.feature_maps
         x = x.view(x.size(0), -1)
 
@@ -304,107 +292,11 @@ class WESUP(nn.Module):
         # classify each superpixel
         self.sp_pred = self.classifier(x)
 
-        # flatten sp_maps to one channel
-        sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)
-
-        # initialize prediction mask
-        pred = torch.zeros(height, width, self.sp_pred.size(1))
-        pred = pred.to(sp_maps.device)
-
-        for sp_idx in range(sp_maps.max().item() + 1):
-            pred[sp_maps == sp_idx] = self.sp_pred[sp_idx]
+        # compute final segmentation prediction
+        sp_maps = (sp_maps > 0).float()
+        pred = torch.mm(sp_maps.t(), self.sp_pred).view(height, width, -1)
 
         return pred.unsqueeze(0)[..., 1]
-
-
-class WESUPPixelInference(WESUP):
-    """Weakly supervised histopathology image segmentation with sparse point annotations."""
-
-    def __init__(self, n_classes=2, D=32, **kwargs):
-        """Initialize a WESUP model.
-
-        Kwargs:
-            n_classes: number of target classes (default to 2)
-            D: output dimension of superpixel features
-
-        Returns:
-            model: a new WESUP model
-        """
-
-        super().__init__()
-
-        self.kwargs = kwargs
-        self.backbone = models.vgg16(pretrained=True).features
-
-        # sum of channels of all feature maps
-        self.fm_channels_sum = 0
-
-        # side convolution layers after each conv feature map
-        for layer in self.backbone:
-            if isinstance(layer, nn.Conv2d):
-                layer.register_forward_hook(self._hook_fn)
-                setattr(self, f'side_conv{self.fm_channels_sum}',
-                        nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1))
-                self.fm_channels_sum += layer.out_channels // 2
-
-        # fully-connected layers for dimensionality reduction
-        self.fc_layers = nn.Sequential(
-            nn.Linear(self.fm_channels_sum, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, D),
-            nn.ReLU()
-        )
-
-        # final softmax classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(D, self.kwargs.get('n_classes', 2)),
-            nn.Softmax(dim=1)
-        )
-
-        # store conv feature maps
-        self.feature_maps = None
-
-        # spatial size of first feature map
-        self.fm_size = None
-
-    def _hook_fn(self, _, input_, output):
-        if self.feature_maps is None:
-            self.fm_size = (input_[0].size(2), input_[0].size(3))
-            side_conv_name = 'side_conv0'
-        else:
-            side_conv_name = f'side_conv{self.feature_maps.size(0)}'
-
-        output = getattr(self, side_conv_name)(output.clone())
-        output = F.interpolate(output, self.fm_size,
-                               mode='bilinear', align_corners=True)
-
-        if self.feature_maps is None:
-            self.feature_maps = output.squeeze()
-        else:
-            self.feature_maps = torch.cat(
-                (self.feature_maps, output.squeeze()))
-
-    def forward(self, x):
-        """Running a forward pass.
-
-        Args:
-            x: input image tensor of size (1, 3, H, W)
-
-        Returns:
-            pred: prediction with size (H, W, C)
-        """
-
-        height, width = x.size()[-2:]
-
-        self.feature_maps = None
-        _ = self.backbone(x)
-        x = self.feature_maps
-        x = x.view(x.size(0), -1)
-        x = self.classifier(self.fc_layers(x.t()))
-
-        return x.view(height, width, -1)
 
 
 class WESUPTrainer(BaseTrainer):
@@ -453,12 +345,12 @@ class WESUPTrainer(BaseTrainer):
     def get_default_optimizer(self):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=1e-3,
+            lr=1e-4,
             momentum=self.kwargs.get('momentum'),
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=20, factor=0.1, min_lr=1e-7, verbose=True)
 
         return optimizer, scheduler
 
@@ -484,17 +376,16 @@ class WESUPTrainer(BaseTrainer):
         else:
             mask = None
 
-        sp_maps, sp_centroids, sp_labels = _preprocess_superpixels(segments, mask,
-                                                                   epsilon=self.kwargs.get('epsilon'))
+        sp_maps, sp_labels = _preprocess_superpixels(segments, mask,
+                                                    epsilon=self.kwargs.get('epsilon'))
 
-        return (img, sp_maps), (pixel_mask, sp_centroids, sp_labels)
+        return (img, sp_maps), (pixel_mask, sp_labels)
 
     def compute_loss(self, pred, target, metrics=None):
-        _, sp_centroids, sp_labels = target
+        _, sp_labels = target
 
         sp_features = self.model.sp_features
         sp_pred = self.model.sp_pred
-
         if sp_pred is None:
             raise RuntimeError('You must run a forward pass before computing loss.')
 
@@ -509,7 +400,7 @@ class WESUPTrainer(BaseTrainer):
             loss = self.xentropy(sp_pred[:labeled_num], sp_labels)
 
             if self.kwargs.get('enable_propagation'):
-                propagated_labels = _label_propagate(sp_features, sp_centroids, sp_labels,
+                propagated_labels = _label_propagate(sp_features, sp_labels,
                                                      threshold=self.kwargs.get('propagate_threshold'))
 
                 propagate_loss = self.xentropy(sp_pred[labeled_num:], propagated_labels)
@@ -524,14 +415,15 @@ class WESUPTrainer(BaseTrainer):
             loss = self.xentropy(sp_pred, sp_labels)
 
         # clear outdated superpixel prediction
-        self.model.sp_pred = None
+        self.model._sp_pred = None
 
         return loss
 
     def postprocess(self, pred, target=None):
         pred = pred.round().long()
         if target is not None:
-            return pred, target[0].argmax(dim=1)
+            pixel_mask, _ = target
+            return pred, pixel_mask.argmax(dim=1)
         return pred
 
     def post_epoch_hook(self, epoch):
