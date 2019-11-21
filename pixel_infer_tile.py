@@ -15,16 +15,6 @@ from infer_tile import divide_image_to_patches
 from infer_tile import combine_patches_to_image
 
 
-def read_image_info(img_path):
-    return img_path.name, imread(str(img_path)).shape[:2]
-
-
-def fuse_prediction_and_save(multiple_preds, info):
-    name, target_size = info
-    fused_pred = sum(multiple_preds) / len(multiple_preds)
-    imsave(output_dir / name, fused_pred.round().astype('uint8') * 255, check_contrast=False)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('data_root')
