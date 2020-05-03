@@ -8,6 +8,7 @@ from .mild_net import MILDNet, MILDNetConfig, MILDNetTrainer
 from .wesup import WESUP, WESUPConfig, WESUPTrainer
 from .wesupv2 import WESUPV2, WESUPV2Config, WESUPV2Trainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
+from .fcn import FCN32s, FCNConfig, FCNTrainer
 
 
 def initialize_trainer(model_type, **kwargs):
@@ -41,6 +42,10 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**MILDNetConfig().to_dict(), **kwargs}
         model = MILDNet()
         trainer = MILDNetTrainer(model, **kwargs)
+    elif model_type == 'fcn':
+        kwargs = {**FCNConfig().to_dict(), **kwargs}
+        model = FCN32s(2)
+        trainer = FCNTrainer(model, **kwargs)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 

@@ -11,7 +11,7 @@ from skimage.segmentation import slic
 from utils import empty_tensor
 from utils import is_empty_tensor
 from utils.data import SegmentationDataset
-from utils.data import PointSupervisionDataset
+from utils.data import Digest2019PointDataset
 from .base import BaseConfig, BaseTrainer
 
 
@@ -24,7 +24,6 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
             encoded label vector. If this vector is all zeros, then its class is unknown.
     Returns:
         sp_maps: superpixel maps with shape (N, H, W)
-        sp_centroids: normalized superpixel centroids with shape (N, 2)
         sp_labels: superpixel labels with shape (N_l, C), where N_l is the number of labeled samples.
     """
 
@@ -32,9 +31,11 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     sp_idx_list = segments.unique()
 
     if mask is not None and not is_empty_tensor(mask):
-
         def compute_superpixel_label(sp_idx):
-            sp_mask = (mask * (segments == sp_idx).long()).float()
+            try:
+                sp_mask = (mask * (segments == sp_idx).long()).float()
+            except:
+
             return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + epsilon)
 
         # compute labels for each superpixel
@@ -50,7 +51,8 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
 
         # quantize superpixel labels (e.g., from (0.7, 0.3) to (1.0, 0.0))
         sp_labels = sp_labels[labeled_sps]
-        sp_labels = (sp_labels == sp_labels.max(dim=-1, keepdim=True)[0]).float()
+        sp_labels = (sp_labels == sp_labels.max(
+            dim=-1, keepdim=True)[0]).float()
     else:  # no supervision provided
         sp_labels = empty_tensor().to(segments.device)
 
@@ -58,16 +60,10 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     sp_maps = segments == sp_idx_list[:, None, None]
     sp_maps = sp_maps.squeeze().float()
 
-    # compute normalized superpixel centroids
-    sp_centroids = torch.cat(
-        [sp_map.nonzero().float().mean(dim=0).unsqueeze(0) for sp_map in sp_maps])
-    sp_centroids[:, 0] /= segments.size(0)
-    sp_centroids[:, 1] /= segments.size(1)
-
     # make sure each superpixel map sums to one
     sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
 
-    return sp_maps, sp_centroids, sp_labels
+    return sp_maps, sp_labels
 
 
 def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
@@ -103,14 +99,12 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
     return torch.sum(ce) / labeled_samples
 
 
-def _label_propagate(features, centroids, y_l, threshold=0.95):
+def _label_propagate(features, y_l, threshold=0.95):
     """Perform random walk based label propagation with similarity graph.
 
     Arguments:
         features: features of size (N, D), where N is the number of superpixels
             and D is the dimension of input features
-        centroids: centroids of size (N, 2), where each centroid is a coordinate (x, y)
-            (both x and y are between 0 and 1)
         y_l: label tensor of size (N, C), where C is the number of classes
         threshold: similarity threshold for label propagation
 
@@ -120,7 +114,6 @@ def _label_propagate(features, centroids, y_l, threshold=0.95):
 
     # disable gradient computation
     features = features.detach()
-    centroids = centroids.detach()
     y_l = y_l.detach()
 
     # number of labeled and unlabeled samples
@@ -128,18 +121,9 @@ def _label_propagate(features, centroids, y_l, threshold=0.95):
     n_u = features.size(0) - n_l
 
     # feature affinity matrix
-    feature_aff = torch.exp(-torch.einsum('ijk,ijk->ij',
-                                          features - features.unsqueeze(1),
-                                          features - features.unsqueeze(1)))
-
-    # space affinity matrix
-    # space_aff = torch.exp(-torch.einsum('ijk,ijk->ij',
-    #                                     centroids - centroids.unsqueeze(1),
-    #                                     centroids - centroids.unsqueeze(1)))
-
-    # the final affinity matrix and transition matrix
-    # W = feature_aff * space_aff  # (N, N)
-    W = feature_aff
+    W = torch.exp(-torch.einsum('ijk,ijk->ij',
+                                features - features.unsqueeze(1),
+                                features - features.unsqueeze(1)))
 
     # sub-matrix of W containing similarities between labeled and unlabeled samples
     W_ul = W[n_l:, :n_l]
@@ -165,16 +149,16 @@ class WESUPConfig(BaseConfig):
     rescale_factor = 0.5
 
     # multi-scale range for training
-    multiscale_range = (0.4, 0.6)
+    multiscale_range = (0.3, 0.4)
 
     # Number of target classes.
     n_classes = 2
 
     # Class weights for cross-entropy loss function.
-    class_weights = (3, 1)
+    class_weights = (1, 3)
 
     # Superpixel parameters.
-    sp_area = 50
+    sp_area = 200
     sp_compactness = 40
 
     # whether to enable label propagation
@@ -201,7 +185,7 @@ class WESUPConfig(BaseConfig):
 class WESUP(nn.Module):
     """Weakly supervised histopathology image segmentation with sparse point annotations."""
 
-    def __init__(self, n_classes=2, D=16, **kwargs):
+    def __init__(self, n_classes=2, D=32, **kwargs):
         """Initialize a WESUP model.
 
         Kwargs:
@@ -239,6 +223,12 @@ class WESUP(nn.Module):
         )
 
         # final softmax classifier
+        # self.classifier = nn.Sequential(
+        #     nn.Linear(D, D // 2),
+        #     nn.ReLU(),
+        #     nn.Linear(D // 2, self.kwargs.get('n_classes', 2)),
+        #     nn.Softmax(dim=1)
+        # )
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
@@ -358,6 +348,12 @@ class WESUPPixelInference(WESUP):
         )
 
         # final softmax classifier
+        # self.classifier = nn.Sequential(
+        #     nn.Linear(D, D // 2),
+        #     nn.ReLU(),
+        #     nn.Linear(D // 2, self.kwargs.get('n_classes', 2)),
+        #     nn.Softmax(dim=1)
+        # )
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
@@ -438,14 +434,13 @@ class WESUPTrainer(BaseTrainer):
         super().__init__(model, **kwargs)
 
         # cross-entropy loss function
-        self.xentropy = partial(_cross_entropy,
-                                class_weights=torch.as_tensor(kwargs.get('class_weights')).to(self.device))
+        self.xentropy = partial(_cross_entropy)
 
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if osp.exists(osp.join(root_dir, 'points')):
-                return PointSupervisionDataset(root_dir, proportion=proportion,
-                                               multiscale_range=self.kwargs.get('multiscale_range'))
+                return Digest2019PointDataset(root_dir, proportion=proportion,
+                                              multiscale_range=self.kwargs.get('multiscale_range'))
             return SegmentationDataset(root_dir, proportion=proportion,
                                        multiscale_range=self.kwargs.get('multiscale_range'))
         return SegmentationDataset(root_dir, rescale_factor=self.kwargs.get('rescale_factor'), train=False)
@@ -458,7 +453,7 @@ class WESUPTrainer(BaseTrainer):
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
@@ -466,16 +461,24 @@ class WESUPTrainer(BaseTrainer):
         data = [datum.to(self.device) for datum in data]
         if len(data) == 3:
             img, pixel_mask, point_mask = data
-        else:
+        elif len(data) == 2:
             img, pixel_mask = data
             point_mask = empty_tensor()
+        elif len(data) == 1:
+            img, = data
+            point_mask = empty_tensor()
+            pixel_mask = empty_tensor()
+        else:
+            raise ValueError('Invalid input data for WESUP')
 
         segments = slic(
             img.squeeze().cpu().numpy().transpose(1, 2, 0),
-            n_segments=int(img.size(-2) * img.size(-1) / self.kwargs.get('sp_area')),
+            n_segments=int(img.size(-2) * img.size(-1) /
+                           self.kwargs.get('sp_area')),
             compactness=self.kwargs.get('sp_compactness'),
         )
-        segments = torch.as_tensor(segments, dtype=torch.long, device=self.device)
+        segments = torch.as_tensor(
+            segments, dtype=torch.long, device=self.device)
 
         if point_mask is not None and not is_empty_tensor(point_mask):
             mask = point_mask.squeeze()
@@ -484,19 +487,20 @@ class WESUPTrainer(BaseTrainer):
         else:
             mask = None
 
-        sp_maps, sp_centroids, sp_labels = _preprocess_superpixels(segments, mask,
-                                                                   epsilon=self.kwargs.get('epsilon'))
+        sp_maps, sp_labels = _preprocess_superpixels(
+            segments, mask, epsilon=self.kwargs.get('epsilon'))
 
-        return (img, sp_maps), (pixel_mask, sp_centroids, sp_labels)
+        return (img, sp_maps), (pixel_mask, sp_labels)
 
     def compute_loss(self, pred, target, metrics=None):
-        _, sp_centroids, sp_labels = target
+        _, sp_labels = target
 
         sp_features = self.model.sp_features
         sp_pred = self.model.sp_pred
 
         if sp_pred is None:
-            raise RuntimeError('You must run a forward pass before computing loss.')
+            raise RuntimeError(
+                'You must run a forward pass before computing loss.')
 
         # total number of superpixels
         total_num = sp_pred.size(0)
@@ -509,10 +513,11 @@ class WESUPTrainer(BaseTrainer):
             loss = self.xentropy(sp_pred[:labeled_num], sp_labels)
 
             if self.kwargs.get('enable_propagation'):
-                propagated_labels = _label_propagate(sp_features, sp_centroids, sp_labels,
+                propagated_labels = _label_propagate(sp_features, sp_labels,
                                                      threshold=self.kwargs.get('propagate_threshold'))
 
-                propagate_loss = self.xentropy(sp_pred[labeled_num:], propagated_labels)
+                propagate_loss = self.xentropy(
+                    sp_pred[labeled_num:], propagated_labels)
                 loss += self.kwargs.get('propagate_weight') * propagate_loss
 
             if metrics is not None and isinstance(metrics, dict):

@@ -113,7 +113,7 @@ def save_predictions(predictions, dataset, output_dir='predictions'):
 
     for pred, img_path in tqdm(zip(predictions, dataset.img_paths), total=len(predictions)):
         pred = pred.astype('uint8')
-        Image.fromarray(pred * 255).save(output_dir / img_path.name)
+        Image.fromarray(pred * 255).save(output_dir / f'{img_path.stem}.png')
 
 
 def infer(trainer, data_dir, output_dir=None, input_size=None,

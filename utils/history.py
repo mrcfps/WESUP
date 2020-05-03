@@ -37,7 +37,7 @@ class HistoryTracker:
     def log(self):
         metrics = {
             k: sum(v) / len(v)
-            for k, v in self.history.items()
+            for k, v in sorted(self.history.items())
             if k.startswith('val_') != self.is_train
         }
         return ', '.join('average {} = {:.4f}'.format(name, value)
@@ -49,12 +49,13 @@ class HistoryTracker:
         if self.save_path is None:
             raise RuntimeError('cannot save history without setting save_path.')
 
-        metrics = [sum(r) / len(r) for r in self.history.values()]
+        keys = [k for k, _ in sorted(self.history.items())]
+        metrics = [sum(v) / len(v) for _, v in sorted(self.history.items())]
         if not os.path.exists(self.save_path):
             # create a new csv file
             with open(self.save_path, 'w') as fp:
                 writer = csv.writer(fp)
-                writer.writerow(list(self.history.keys()) + ['lr'])
+                writer.writerow(keys + ['lr'])
                 writer.writerow(metrics + [self.learning_rate])
         else:
             with open(self.save_path, 'a') as fp:

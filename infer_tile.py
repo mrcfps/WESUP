@@ -45,7 +45,7 @@ def divide_image_to_patches(img, patch_size):
 
     assert len(img.shape) == 3 and img.shape[-1] == 3
 
-    height, width, n_channels = img.shape
+    height, width, _ = img.shape
     coordinates = _get_top_left_coordinates(height, width, patch_size)
 
     patches = []
@@ -63,14 +63,15 @@ def combine_patches_to_image(patches, target_height, target_width):
         patches: predicted patches of shape (N, H, W, C) or (N, H, W)
         target_height: target height of combined image
         target_width: target width of combined image
-    
+
     Returns:
         combined: combined output of shape (H, W, C) or (H, W)
     """
 
     counter = 0
     patch_size = patches.shape[1]
-    coordinates = _get_top_left_coordinates(target_height, target_width, patch_size)
+    coordinates = _get_top_left_coordinates(
+        target_height, target_width, patch_size)
 
     if len(patches.shape) == 3:  # channel dimension is missing
         patches = np.expand_dims(patches, -1)
@@ -109,6 +110,7 @@ def predict(trainer, img_path, patch_size, device='cpu'):
 
     for patch in patches:
         input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
+        input_, _ = trainer.preprocess(input_)
         prediction = trainer.postprocess(trainer.model(input_))
         prediction = prediction.detach().cpu().numpy()
         predictions.append(prediction[..., np.newaxis])

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from torchvision.models import vgg16
 
 from utils.data import SegmentationDataset
@@ -12,7 +13,7 @@ class CDWSConfig(BaseConfig):
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
-    input_size = (400, 400)
+    input_size = (288, 384)
 
     # Fixed fusion weights
     fusion_weights = (0.2, 0.35, 0.45)
@@ -180,7 +181,10 @@ class CDWSTrainer(BaseTrainer):
             {'params': self.model.side.parameters(), 'lr': self.kwargs.get('side_lr')}
         ], lr=self.kwargs.get('vgg_lr'), weight_decay=self.kwargs.get('weight_decay'))
 
-        return optimizer, None
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+
+        return optimizer, scheduler
 
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
@@ -241,7 +245,9 @@ class CDWSTrainer(BaseTrainer):
         metrics['side_loss'] = side_loss.mean().item()
         metrics['fuse_loss'] = fuse_loss.mean().item()
 
-        return torch.mean(side_loss + fuse_loss)
+        loss = torch.mean(side_loss + fuse_loss)
+
+        return loss
 
     def postprocess(self, pred, target=None):
         pred = pred.round().long()
@@ -250,3 +256,9 @@ class CDWSTrainer(BaseTrainer):
                 target = target[0]
             return pred, target.argmax(dim=1)
         return pred
+
+    def post_epoch_hook(self, epoch):
+        if self.scheduler is not None:
+            loss = np.mean(self.tracker.history['loss'])
+
+            self.scheduler.step(loss)

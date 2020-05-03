@@ -138,7 +138,7 @@ class BaseTrainer(ABC):
             if self.optimizer is not None:
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-            if self.scheduler is not None:
+            if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
                 self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         else:
             self.record_dir = Path(record.prepare_record_dir())
@@ -195,6 +195,10 @@ class BaseTrainer(ABC):
             pred = self.model(input_)
             if phase == 'train':
                 loss = self.compute_loss(pred, target, metrics=metrics)
+
+                if torch.isnan(loss):
+                    return
+
                 metrics['loss'] = loss.item()
 
                 loss.backward()
@@ -202,7 +206,7 @@ class BaseTrainer(ABC):
 
         pred, target = self.postprocess(pred, target)
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
-    
+
     def train_one_epoch(self, no_val=False):
         """Hook for training one epoch.
 
@@ -262,7 +266,8 @@ class BaseTrainer(ABC):
 
         self.optimizer, self.scheduler = self.get_default_optimizer()
         self.load_checkpoint(self.kwargs.get('checkpoint'))
-        self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))
+        self.logger.addHandler(logging.FileHandler(
+            self.record_dir / 'train.log'))
         serializable_kwargs = {
             k: v for k, v in self.kwargs.items()
             if isinstance(v, (int, float, str, tuple))
@@ -298,7 +303,8 @@ class BaseTrainer(ABC):
         total_epochs = epochs + self.initial_epoch - 1
 
         for epoch in range(self.initial_epoch, total_epochs + 1):
-            self.logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
+            self.logger.info(
+                underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
 
             self.tracker.start_new_epoch(self.optimizer.param_groups[0]['lr'])
             self.train_one_epoch(no_val=(not val_path.exists()))
@@ -311,13 +317,15 @@ class BaseTrainer(ABC):
             record.plot_learning_curves(self.tracker.save_path)
 
             # save checkpoints for resuming training
-            ckpt_path = self.record_dir / 'checkpoints' / f'ckpt.{epoch:04d}.pth'
+            ckpt_path = self.record_dir / \
+                'checkpoints' / f'ckpt.{epoch:04d}.pth'
+
             self.save_checkpoint(ckpt_path, epoch=epoch,
-                                 optimizer_state_dict=self.optimizer.state_dict())
+                                optimizer_state_dict=self.optimizer.state_dict())
 
             # remove previous checkpoints
-            for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
-                os.remove(ckpt_path)
+            # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
+            #     os.remove(ckpt_path)
 
         self.logger.info(self.tracker.report())
 
