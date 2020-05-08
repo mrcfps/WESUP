@@ -32,10 +32,7 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
 
     if mask is not None and not is_empty_tensor(mask):
         def compute_superpixel_label(sp_idx):
-            try:
-                sp_mask = (mask * (segments == sp_idx).long()).float()
-            except:
-
+            sp_mask = (mask * (segments == sp_idx).long()).float()
             return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + epsilon)
 
         # compute labels for each superpixel
@@ -155,7 +152,7 @@ class WESUPConfig(BaseConfig):
     n_classes = 2
 
     # Class weights for cross-entropy loss function.
-    class_weights = (1, 3)
+    class_weights = (3, 1)
 
     # Superpixel parameters.
     sp_area = 200
@@ -448,14 +445,14 @@ class WESUPTrainer(BaseTrainer):
     def get_default_optimizer(self):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=1e-3,
+            lr=5e-5,
             momentum=self.kwargs.get('momentum'),
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
-        return optimizer, scheduler
+        return optimizer, None
 
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]

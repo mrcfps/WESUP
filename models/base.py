@@ -50,7 +50,8 @@ class BaseTrainer(ABC):
             trainer: a new BaseTrainer instance
         """
 
-        self.device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = kwargs.get(
+            'device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.model = model.to(self.device)
         self.kwargs = kwargs
 
@@ -136,10 +137,12 @@ class BaseTrainer(ABC):
             self.model.load_state_dict(checkpoint['model_state_dict'])
 
             if self.optimizer is not None:
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                self.optimizer.load_state_dict(
+                    checkpoint['optimizer_state_dict'])
 
             if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                self.scheduler.load_state_dict(
+                    checkpoint['scheduler_state_dict'])
         else:
             self.record_dir = Path(record.prepare_record_dir())
             record.copy_source_files(self.record_dir)
@@ -321,11 +324,11 @@ class BaseTrainer(ABC):
                 'checkpoints' / f'ckpt.{epoch:04d}.pth'
 
             self.save_checkpoint(ckpt_path, epoch=epoch,
-                                optimizer_state_dict=self.optimizer.state_dict())
+                                 optimizer_state_dict=self.optimizer.state_dict())
 
             # remove previous checkpoints
-            # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
-            #     os.remove(ckpt_path)
+            for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
+                os.remove(ckpt_path)
 
         self.logger.info(self.tracker.report())
 
