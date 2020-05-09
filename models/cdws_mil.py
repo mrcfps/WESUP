@@ -13,7 +13,7 @@ class CDWSConfig(BaseConfig):
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
-    input_size = (288, 384)
+    input_size = (400, 400)
 
     # Fixed fusion weights
     fusion_weights = (0.2, 0.35, 0.45)
@@ -131,7 +131,8 @@ class CDWS(nn.Module):
                               mode='bilinear', align_corners=True)
 
         # concatenate side outputs
-        self.side_outputs = torch.cat([side1, side2, side3], dim=1)  # (B, 3, H, W)
+        self.side_outputs = torch.cat(
+            [side1, side2, side3], dim=1)  # (B, 3, H, W)
 
         if self.fusion_weights is None:
             weights = torch.tensor(self.kwargs.get('fusion_weights'))
@@ -184,7 +185,7 @@ class CDWSTrainer(BaseTrainer):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
 
-        return optimizer, scheduler
+        return optimizer, None
 
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
@@ -222,7 +223,8 @@ class CDWSTrainer(BaseTrainer):
 
         def mil_loss(output):
             output = output.clamp(min=epsilon, max=(1 - epsilon))
-            image_pred = output.mean(dim=(2, 3)) ** (1 / self.kwargs.get('gmp'))  # (B, C)
+            image_pred = output.mean(
+                dim=(2, 3)) ** (1 / self.kwargs.get('gmp'))  # (B, C)
             return target_class * -torch.log(image_pred) + \
                 (1 - target_class) * -torch.log(1 - image_pred)
 
@@ -233,13 +235,15 @@ class CDWSTrainer(BaseTrainer):
 
         side_mil_loss = mil_loss(self.model.side_outputs)  # (B, 3)
         side_ac_loss = ac_loss(self.model.side_outputs)  # (B, 3)
-        side_ac_weights = torch.tensor(self.kwargs.get('side_ac_weights')).to(device).unsqueeze(0)  # (1, 3)
+        side_ac_weights = torch.tensor(self.kwargs.get(
+            'side_ac_weights')).to(device).unsqueeze(0)  # (1, 3)
         side_loss = side_mil_loss + side_ac_weights * side_ac_loss  # (B, 3)
         side_loss = torch.sum(side_loss, dim=1)  # (B,)
 
         fuse_mil_loss = mil_loss(self.model.fused_output)  # (B, 1)
         fuse_ac_loss = ac_loss(self.model.fused_output)  # (B, 1)
-        fuse_loss = fuse_mil_loss + self.kwargs.get('fuse_ac_weight') * fuse_ac_loss  # (B, 1)
+        fuse_loss = fuse_mil_loss + \
+            self.kwargs.get('fuse_ac_weight') * fuse_ac_loss  # (B, 1)
         fuse_loss = fuse_loss.squeeze()  # (B,)
 
         metrics['side_loss'] = side_loss.mean().item()

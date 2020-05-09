@@ -200,7 +200,7 @@ class BaseTrainer(ABC):
                 loss = self.compute_loss(pred, target, metrics=metrics)
 
                 if torch.isnan(loss):
-                    return
+                    raise ValueError('Loss is nan!')
 
                 metrics['loss'] = loss.item()
 

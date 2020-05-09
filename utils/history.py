@@ -36,7 +36,7 @@ class HistoryTracker:
 
     def log(self):
         metrics = {
-            k: sum(v) / len(v)
+            k: (sum(v) / len(v) if v else 0)
             for k, v in sorted(self.history.items())
             if k.startswith('val_') != self.is_train
         }
@@ -47,7 +47,8 @@ class HistoryTracker:
         """Save averaged metrics in this epoch to csv file."""
 
         if self.save_path is None:
-            raise RuntimeError('cannot save history without setting save_path.')
+            raise RuntimeError(
+                'cannot save history without setting save_path.')
 
         keys = [k for k, _ in sorted(self.history.items())]
         metrics = [sum(v) / len(v) for _, v in sorted(self.history.items())]
