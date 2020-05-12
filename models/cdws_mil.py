@@ -23,8 +23,8 @@ class CDWSConfig(BaseConfig):
     fuse_ac_weight = 10
 
     # learning rates
-    vgg_lr = 1e-3
-    side_lr = 1e-5
+    vgg_lr = 5e-5
+    side_lr = 5e-5
 
     # weight decay for optimization
     weight_decay = 5e-4
@@ -185,7 +185,7 @@ class CDWSTrainer(BaseTrainer):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
 
-        return optimizer, None
+        return optimizer, scheduler
 
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
