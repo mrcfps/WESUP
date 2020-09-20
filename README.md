@@ -1,6 +1,6 @@
-# Wessup
+# WESUP
 
-WEakly Supervised SUPerpixels for medical image segmentation using dot annotation.
+Source code for our paper *Weakly Supervised Histopathology Image Segmentation with Sparse Point Annotations*.
 
 ## Data Preparation
 
@@ -32,10 +32,14 @@ data_glas
         └── val-2.png
 ```
 
-#### Generating point labels
+### Colorectal Adenocarcinoma Gland (CRAG) dataset
+
+Download the dataset from this [link](https://warwick.ac.uk/fac/sci/dcs/research/tia/data/mildnet/). Then organize this dataset like GlaS mentioned above.
+
+### Generating point labels
 
 ```bash
-$ python scripts/generate_dot_annotation.py data_glas -p 1e-4
+$ python scripts/generate_points.py /path/to/dataset -p 1e-4
 ```
 
 > The `-p` or `--label-percent` argument is for controlling the percentage of labeled pixels. Larger value means stronger supervision.
@@ -47,10 +51,10 @@ p1_top,p1_left,p1_class
 p2_top,p2_left,p2_class
 ```
 
-#### Visualizing point labels
+### Visualizing point labels
 
 ```bash
-$ python scripts/visualize_dot_annotation.py data_glas/train
+$ python scripts/visualize_points.py data_glas/train
 ```
 
 You will see visualization outputs in `data_glas/train/viz`.
@@ -60,22 +64,13 @@ You will see visualization outputs in `data_glas/train/viz`.
 ### Training from scratch
 
 ```bash
-$ python train.py /path/to/dataset -b resnet50 -w 5 -e 50 -j 4
+$ python train.py /path/to/dataset --epochs 100
 ```
-
-Notes on important arguments:
-
-- `-b` or `--backbone` takes a string representing the CNN backbone, such as `vgg13` or `resnet50`. Currently, only VGG Family (`vgg11`, `vgg13`, `vgg16` and `vgg19`), ResNet family (`resnet18`, `resnet34`, `resnet50`, `resnet101` and `resnet152`) and DenseNet family (`densenet121`, `densenet161`, `densenet169` and `densenet201`) are supported.
-- `-w` or `--warmup` takes an integer, which is the number of warmup epochs where only parameters of the MLP classifier is updated.
-- `-e` or `--epochs` takes an integer, which is the number of training epochs
-- `-j` or `--jobs` is the number of workers for data preprocessing and loading. Since SLIC operation can take nonnegligible amount of time, more workers can bring about significant speedup for training
-
-For all arguments and options, run `python train.py -h`.
 
 ### Resume training from a checkpoint
 
 ```bash
-$ python train.py /path/to/dataset -e 20 -j 4 -r /path/to/checkpoint
+$ python train.py /path/to/dataset --epochs 100 --checkpoint /path/to/checkpoint
 ```
 
 ### Recording multple runs
@@ -107,14 +102,16 @@ records/20190423-1122-AM
 
 ## Inference
 
+We offer four types of inference utilities:
+
+- Superpixel-wise inference (the `infer.py` script)
+- Superpixel-wise inference with tiling strategy (the `infer_tile.py` script)
+- Pixel-wise inference (the `pixel_infer.py` script)
+- Pixel-wise inference with tiling strategy (the `pixel_infer_tile.py` script)
+
+Example:
+
 ```bash
-$ python infer.py /path/to/test/data -c /path/to/checkpoint -o prediction -j 4
-```
-
-Test images should be placed in a subdirectory named `images`.
-
-### Testing on GlaS dataset
-
-```bash
-$ python test.py data_glas -c /path/to/checkpoint
+$ python infer.py /path/to/test/data --checkpoint /path/to/checkpoint
+$ python pixel_infer_tile.py /path/to/test/data --checkpoint /path/to/checkpoint --patch-size 400
 ```
